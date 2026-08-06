@@ -1,7 +1,8 @@
 {
   "expo": {
-    "name": "tmp_scaffold",
-    "slug": "tmp_scaffold",
+    "name": "Calorie Tracker",
+    "slug": "gatej-calories",
+    "scheme": "caloriemate",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -10,6 +11,7 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.gatej.calories",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -20,6 +22,10 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-sqlite",
+      "expo-font"
+    ]
   }
 }
