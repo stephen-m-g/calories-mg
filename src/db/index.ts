@@ -9,6 +9,8 @@ export async function initDb(): Promise<void> {
 export * from './client';
 export * from './foods';
 export * from './foodLogs';
+export * from './recipes';
 export * from './waterLogs';
+export * from './weightLogs';
 export * from './userSettings';
 export * from './backupLog';

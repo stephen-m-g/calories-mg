@@ -104,6 +104,14 @@ export async function deleteFoodLog(id: string): Promise<void> {
   await db.runAsync('DELETE FROM food_logs WHERE id = ?', id);
 }
 
+export async function getEarliestLoggedAt(): Promise<string | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ earliest: string | null }>(
+    'SELECT MIN(logged_at) AS earliest FROM food_logs'
+  );
+  return row?.earliest ?? null;
+}
+
 export async function hasFoodLogsBetween(startIso: string, endIso: string): Promise<boolean> {
   const db = await getDb();
   const row = await db.getFirstAsync<{ found: number }>(

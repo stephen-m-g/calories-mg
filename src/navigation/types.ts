@@ -10,8 +10,13 @@ export type TabParamList = {
 export type RootStackParamList = {
   Tabs: NavigatorScreenParams<TabParamList>;
   Settings: undefined;
-  AddFoodSearch: { initialMealType?: MealType } | undefined;
-  AddFoodEntry: { food: SearchResultFood; initialMealType?: MealType };
+  AddFoodSearch: { logDate: string; initialMealType?: MealType };
+  AddFoodEntry: { food: SearchResultFood; logDate: string; initialMealType?: MealType };
+  AddFoodPhoto: { initialMealType?: MealType } | undefined;
+  AddFoodBarcode: { initialMealType?: MealType } | undefined;
+  AddFoodVoice: { initialMealType?: MealType } | undefined;
+  CreateRecipe: { recipeId?: string } | undefined;
+  CreateCustomFood: undefined;
 };
 
 declare global {

@@ -151,7 +151,9 @@ export function TodayScreen() {
                 isFirst={index === 0}
                 isLast={index === MEAL_ORDER.length - 1}
                 onToggle={() => toggleMeal(mealType)}
-                onLogPress={() => navigation.navigate('AddFoodSearch', { initialMealType: mealType })}
+                onLogPress={() =>
+                  navigation.navigate('AddFoodSearch', { logDate: selectedDate, initialMealType: mealType })
+                }
                 onDeleteLog={handleDeleteFoodLog}
               />
             );

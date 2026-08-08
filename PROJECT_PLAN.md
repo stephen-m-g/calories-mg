@@ -26,13 +26,14 @@ All four methods converge on the same underlying entry screen and the same data 
 - Optional WHOOP account connection for automatic, live calories-burned data
 - Macro breakdown (protein/carbs/fat)
 - Meal categorization (breakfast/lunch/dinner/snack)
-- Water logging
+- Recipes — user-created combinations of multiple ingredients, logged as a single unit (see §5, §11)
 - Daily summary view + historical/trend views
 - Local-first storage, manual/scheduled cloud backup (Azure Blob Storage)
 - Android internal-distribution build via EAS
 
 **Explicitly out of scope for v1** (revisit later):
 - Habit learning (typical portion sizes, preferred ground beef leanness, "usual" defaults per food) — noted by the user as a good idea, deliberately deferred
+- Water logging — was built and shipped in an earlier iteration, then deliberately dropped per user feedback (not useful enough to keep). The `water_logs` table stays in the schema (harmless, matches historical data if any exists) but water logging is no longer a v1 deliverable. See §11.
 - Multi-user support, auth, account system
 - Multi-device real-time sync
 - iOS build
@@ -97,7 +98,7 @@ All tables live in a single local SQLite database. Timestamps are ISO 8601 strin
 | Column | Type | Notes |
 |---|---|---|
 | id | TEXT PK (uuid) | |
-| source | TEXT | `usda` \| `off` \| `custom` |
+| source | TEXT | `usda` \| `off` \| `custom` \| `recipe` |
 | source_id | TEXT nullable | USDA `fdcId` or OFF barcode, if applicable |
 | barcode | TEXT nullable, indexed | for barcode lookups |
 | name | TEXT | |
@@ -134,12 +135,43 @@ All tables live in a single local SQLite database. Timestamps are ISO 8601 strin
 
 > Macros are snapshotted at log time (not recomputed from `foods` live) so editing a cached food later doesn't retroactively rewrite history.
 
+### `recipes` — user-created combinations of multiple ingredients
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT PK (uuid) | |
+| name | TEXT | |
+| created_at | TEXT | |
+| last_used_at | TEXT nullable | for recents sorting, same convention as `foods` |
+
+### `recipe_ingredients` — line items belonging to a recipe
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT PK (uuid) | |
+| recipe_id | TEXT FK → recipes.id | |
+| food_id | TEXT FK → foods.id | ingredients are individual foods only — no nesting recipes inside recipes |
+| quantity_amount | REAL | |
+| quantity_unit | TEXT | matches the ingredient food's `reference_unit`, same simplification as `food_logs.quantity_unit` |
+| sort_order | INTEGER | preserves the order ingredients were added |
+
+> A recipe's total macros are **not** stored — they're computed live by joining `recipe_ingredients` → `foods` and summing each line's scaled macros, so editing a recipe's ingredients is immediately reflected. Logging a recipe works through the same `foods` → `food_logs` pipeline as any other food: at log time, the recipe's current totals are upserted into a `foods` row (`source='recipe'`, `source_id=recipes.id`, `reference_amount=1`, `reference_unit='each'` — quantity logged is servings/fraction of the batch), then a normal `food_logs` snapshot is created from that. This means past logs stay correct even if the recipe is edited later (same snapshot guarantee as any other food), while the cached `foods` row for a recipe is refreshed — not treated as immutable — each time it's logged, since (unlike a USDA/OFF food) its own definition can change.
+
 ### `water_logs`
+> Retained in the schema but **not part of v1 scope** — water logging was built, then descoped. See §2, §11.
+
 | Column | Type |
 |---|---|
 | id | TEXT PK |
 | logged_at | TEXT |
 | amount_ml | REAL |
+
+### `weight_logs`
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT PK | |
+| logged_at | TEXT | |
+| weight_lbs | REAL | pounds — this is a single US-based user's app; see §11 |
+
+> Chart data (Progress → Trends) uses one point per day; if multiple entries exist for the same day, the most recent is used.
 
 ### `user_settings`
 | Column | Type | Notes |
@@ -279,6 +311,7 @@ The food database is **never mirrored locally in bulk** — only foods actually 
 | Cached foods (`foods`) | ~800–1,500 rows | ~1 MB |
 | Food logs | ~2,200 rows | ~0.7 MB |
 | Water logs | ~1,500 rows | ~0.1 MB |
+| Weight logs | ~365 rows | <0.1 MB |
 | **Structured data total** | | **~1–2 MB/year** |
 | Meal photos (if retained, ~300 KB avg, ~1–2/day) | ~500 photos | ~100–250 MB/year |
 
@@ -293,14 +326,13 @@ Voice recordings are **not persisted** — only the transcript is kept (in `food
 
 ## 9. Screens / Navigation Map
 
-- **Today** (home): goal-mode-dependent header — either a calorie ring (fixed intake) or eaten/burned/net vs. target-net (deficit mode, live via WHOOP) — plus macro breakdown, meals list (breakfast/lunch/dinner/snacks), water tracker, floating "add" button → method picker (manual/voice/photo/barcode)
-- **Add — Manual**: search → results list → entry form (quantity, meal type)
+- **Today** (home): goal-mode-dependent header — either a calorie ring (fixed intake) or eaten/burned/net vs. target-net (deficit mode, live via WHOOP) — plus macro breakdown, meals list (breakfast/lunch/dinner/snacks), a week strip + calendar for jumping to any day (this doubles as day-browsing — see "History" note below), floating "add" button → method picker (manual/voice/photo/barcode)
+- **Add — Manual**: search → results list (All / My Recipes / My Foods) → entry form (quantity, meal type)
 - **Add — Voice**: record → transcript review → parsed items confirm screen
 - **Add — Photo**: camera → recognized items confirm screen
 - **Add — Barcode**: scanner → lookup result (or label-photo fallback) → entry form
-- **History**: calendar/list of past days, tap a day → that day's full log
-- **Trends**: calorie/macro charts over time (week/month view)
-- **Settings**: goal mode toggle (fixed intake / deficit) + corresponding goal input, macro/water goals, WHOOP connect/disconnect, backup now, app info
+- **Progress** (formerly split into History + Trends): History was dropped as a separate screen — Today's own date nav (week strip + calendar) already covers browsing any past day's full log, so a second calendar view would be redundant. Progress is Trends only: calorie chart (eaten-per-day, or deficit-per-day once WHOOP is connected) with time range toggle (week/month/3mo/6mo/all-time), weight overlaid as a secondary-axis line, and weight logging itself lives on this screen.
+- **Settings**: goal mode toggle (fixed intake / deficit — deficit shown but disabled until WHOOP is connected), calorie + macro goal inputs, WHOOP connect/disconnect (disabled, Phase 8), backup now (disabled, Phase 9), app info
 
 ## 10. Build Phases
 
@@ -311,8 +343,8 @@ Each phase should end in something runnable/testable before moving to the next.
 | 0 | Expo + TypeScript scaffolding, navigation shell, folder structure, env var setup, git init |
 | 1 | SQLite schema + typed data access layer + migrations, default settings seeded |
 | 2 | Manual entry loop end-to-end (search → log → Today screen shows real data) |
-| 3 | Water logging + Settings/goals screen |
-| 4 | History + Trends views |
+| 3 | Settings/goals screen (water logging dropped — see §11) |
+| 4 | Trends view (History dropped — see §9) + weight logging |
 | 5 | Voice entry pipeline (Groq + Gemini) |
 | 6 | Photo entry pipeline (Gemini) |
 | 7 | Barcode entry pipeline (Open Food Facts + label-photo fallback) |
@@ -328,3 +360,10 @@ Each phase should end in something runnable/testable before moving to the next.
 - **No auth/accounts**: not needed for a permanent single-user personal app.
 - **WHOOP: polling, not webhooks**: since there's no backend to receive them, WHOOP webhooks are skipped in favor of polling the Cycle Collection endpoint on Today-screen focus/refresh. Official public API only — no reverse-engineered endpoints.
 - **Deficit-mode display**: show eaten/burned/net/target-net as plain numbers rather than a single projected "calories remaining today," to avoid silently baking in a TDEE-projection assumption. Revisit if a projected-remaining view proves worth the tradeoff.
+- **Water logging dropped**: built and shipped on the Today screen during Phase 2/3 UI work, then removed at the user's request ("pretty unnecessary... don't think it would be very useful"). `water_logs` stays in the schema (harmless) but is no longer a v1 deliverable.
+- **Recipes added**: user-created multi-ingredient combinations, added mid-Phase-3 as a real feature (not originally in this plan). A recipe's macros are computed live from its ingredients rather than cached, and logging a recipe reuses the existing `foods` → `food_logs` pipeline via an upsert-on-log cache (see §5 for the full rationale). Ingredients can only be individual foods, not other recipes — no nesting.
+- **Settings built ahead of its WHOOP/backup dependencies**: rather than waiting until Phases 8/9 to build any of Settings, the whole screen ships in Phase 3 — goal mode, calorie goal, and macro goals are fully functional now, while the deficit-mode option, WHOOP connect, and "Back up now" are visible but disabled with a "coming later" state. Chosen over leaving those sections out entirely, since a visibly-disabled control is a more honest signal than a screen that silently omits functionality described in §9.
+- **History dropped, folded into Today**: a separate History screen (calendar → day detail) would have been redundant with Today's own week-strip + calendar date navigation, which already lets you view any day's full log in place. Progress is Trends-only.
+- **Weight tracking added**: not originally in this plan. A new `weight_logs` table (see §5) backs a weight-logging UI on the Progress screen and a secondary-axis line on the Trends chart. Stored in pounds, matching this app's US-only context (USDA FDC, Azure region, Android-only distribution) — no unit-preference setting, since this is a single fixed user.
+- **Charting library: `react-native-gifted-charts`**: chosen over heavier alternatives (e.g. Victory Native) since the charting need is narrow — one combo chart (calories as bars, weight as a secondary-axis line) rather than a general-purpose dashboard. Verified it genuinely supports both a secondary Y-axis (`secondaryYAxis`/`secondaryData`) and zero-centered/negative bars (`mostNegativeValue`, `noOfSectionsBelowXAxis`) before committing, since those are the two features the deficit-mode chart will depend on later. Depends on `react-native-svg` and accepts `expo-linear-gradient` (already installed) as its gradient peer — no new gradient library needed.
+- **Deficit/surplus chart deferred**: the zero-centered diverging bar chart (surplus above a middle axis, deficit below) is designed for but not built until WHOOP (Phase 8) actually produces deficit data. It's also expected to be mutually exclusive with the weight secondary-axis overlay, since a zero-centered bar axis and a secondary value axis don't compose cleanly — to be resolved when Phase 8 lands.

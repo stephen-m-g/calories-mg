@@ -1,6 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import { getDb } from './client';
 import type { Food } from '../types/models';
+import type { SearchResultFood } from '../types/search';
 
 interface FoodRow {
   id: string;
@@ -110,7 +111,82 @@ export async function createFood(food: NewFood): Promise<Food> {
   return { ...food, id, createdAt, lastUsedAt: null };
 }
 
+/** Looks up a search result's cached row by source+sourceId, caching it if this is the
+ * first time it's been picked. Shared by the food-entry flow and the recipe builder. */
+export async function findOrCacheFood(food: SearchResultFood): Promise<Food> {
+  const existing = await getFoodBySourceId(food.source, food.sourceId);
+  if (existing) return existing;
+  return createFood({
+    source: food.source,
+    sourceId: food.sourceId,
+    barcode: food.barcode,
+    name: food.name,
+    brand: food.brand,
+    referenceAmount: food.referenceAmount,
+    referenceUnit: food.referenceUnit,
+    calories: food.calories,
+    proteinG: food.proteinG,
+    carbsG: food.carbsG,
+    fatG: food.fatG,
+    fiberG: food.fiberG,
+    sugarG: food.sugarG,
+    sodiumMg: food.sodiumMg,
+  });
+}
+
 export async function touchFoodLastUsed(id: string, when = new Date().toISOString()): Promise<void> {
   const db = await getDb();
   await db.runAsync('UPDATE foods SET last_used_at = ? WHERE id = ?', when, id);
+}
+
+export async function searchFoodsByName(query: string, limit = 20): Promise<Food[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<FoodRow>(
+    'SELECT * FROM foods WHERE name LIKE ? COLLATE NOCASE ORDER BY last_used_at DESC LIMIT ?',
+    `%${query}%`,
+    limit
+  );
+  return rows.map(rowToFood);
+}
+
+/** "My Foods" — ingredients the user manually created (name/serving/macros), not
+ * anything auto-cached from a USDA/OFF search. */
+export async function getCustomFoods(limit = 50): Promise<Food[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<FoodRow>(
+    "SELECT * FROM foods WHERE source = 'custom' ORDER BY created_at DESC LIMIT ?",
+    limit
+  );
+  return rows.map(rowToFood);
+}
+
+export async function searchCustomFoodsByName(query: string, limit = 20): Promise<Food[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<FoodRow>(
+    "SELECT * FROM foods WHERE source = 'custom' AND name LIKE ? COLLATE NOCASE ORDER BY created_at DESC LIMIT ?",
+    `%${query}%`,
+    limit
+  );
+  return rows.map(rowToFood);
+}
+
+interface CachedFoodMacros {
+  calories: number;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+}
+
+/** Unlike USDA/OFF-sourced foods, a recipe-derived cached food isn't immutable — its
+ * definition can change, so logging it refreshes the cache rather than reusing stale macros. */
+export async function updateCachedFoodMacros(id: string, macros: CachedFoodMacros): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    'UPDATE foods SET calories = ?, protein_g = ?, carbs_g = ?, fat_g = ? WHERE id = ?',
+    macros.calories,
+    macros.proteinG,
+    macros.carbsG,
+    macros.fatG,
+    id
+  );
 }

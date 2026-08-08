@@ -10,6 +10,11 @@ export function todayYmd(): string {
   return dateToYmd(new Date());
 }
 
+/** Converts a stored ISO datetime string to the local calendar day it falls on. */
+export function isoToLocalYmd(iso: string): string {
+  return dateToYmd(new Date(iso));
+}
+
 /** Adds (or subtracts, if negative) whole days to a YYYY-MM-DD date. */
 export function shiftYmd(ymd: string, days: number): string {
   const [y, m, d] = ymd.split('-').map(Number);
@@ -22,6 +27,14 @@ export function dayBoundsIso(ymd: string): { startIso: string; endIso: string } 
   const start = new Date(y, m - 1, d, 0, 0, 0, 0);
   const end = new Date(y, m - 1, d, 23, 59, 59, 999);
   return { startIso: start.toISOString(), endIso: end.toISOString() };
+}
+
+/** "Right now" projected onto the given calendar day — same wall-clock time, different date. Used
+ * when logging to a day other than today, so backlogged entries don't all pile up at midnight. */
+export function loggedAtIso(ymd: string): string {
+  const now = new Date();
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds()).toISOString();
 }
 
 const MONTH_ABBR = [

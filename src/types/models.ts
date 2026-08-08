@@ -1,4 +1,4 @@
-export type FoodSource = 'usda' | 'off' | 'custom';
+export type FoodSource = 'usda' | 'off' | 'custom' | 'recipe';
 export type ReferenceUnit = 'g' | 'ml' | 'oz' | 'each';
 export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
 export type InputMethod = 'manual' | 'voice' | 'photo' | 'barcode';
@@ -42,10 +42,32 @@ export interface FoodLog {
   createdAt: string;
 }
 
+export interface Recipe {
+  id: string;
+  name: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+export interface RecipeIngredient {
+  id: string;
+  recipeId: string;
+  foodId: string;
+  quantityAmount: number;
+  quantityUnit: ReferenceUnit;
+  sortOrder: number;
+}
+
 export interface WaterLog {
   id: string;
   loggedAt: string;
   amountMl: number;
+}
+
+export interface WeightLog {
+  id: string;
+  loggedAt: string;
+  weightLbs: number;
 }
 
 export interface UserSettings {

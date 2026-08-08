@@ -95,6 +95,42 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 2,
+    up: async (db) => {
+      await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS recipes (
+          id TEXT PRIMARY KEY NOT NULL,
+          name TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          last_used_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS recipe_ingredients (
+          id TEXT PRIMARY KEY NOT NULL,
+          recipe_id TEXT NOT NULL REFERENCES recipes(id),
+          food_id TEXT NOT NULL REFERENCES foods(id),
+          quantity_amount REAL NOT NULL,
+          quantity_unit TEXT NOT NULL,
+          sort_order INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_recipe_ingredients_recipe_id ON recipe_ingredients(recipe_id);
+      `);
+    },
+  },
+  {
+    version: 3,
+    up: async (db) => {
+      await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS weight_logs (
+          id TEXT PRIMARY KEY NOT NULL,
+          logged_at TEXT NOT NULL,
+          weight_lbs REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_weight_logs_logged_at ON weight_logs(logged_at);
+      `);
+    },
+  },
 ];
 
 export async function runMigrations(db: SQLiteDatabase): Promise<void> {
