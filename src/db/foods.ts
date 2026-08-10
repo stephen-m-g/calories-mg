@@ -95,6 +95,12 @@ export async function createFood(food: NewFood): Promise<Food> {
   const id = Crypto.randomUUID();
   const createdAt = new Date().toISOString();
 
+  // A user-created food has no upstream database to point at, so it is its own source. Leaving
+  // source_id null breaks the round-trip: search results surface custom foods using their local
+  // id, and findOrCacheFood then looks them up by (source, source_id) and finds nothing — so
+  // every log of a custom food silently inserted another copy of it.
+  const sourceId = food.sourceId ?? (food.source === 'custom' ? id : null);
+
   await db.runAsync(
     `INSERT INTO foods (
       id, source, source_id, barcode, name, brand,
@@ -103,7 +109,7 @@ export async function createFood(food: NewFood): Promise<Food> {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     food.source,
-    food.sourceId,
+    sourceId,
     food.barcode,
     food.name,
     food.brand,
@@ -120,7 +126,7 @@ export async function createFood(food: NewFood): Promise<Food> {
     null
   );
 
-  return { ...food, id, createdAt, lastUsedAt: null };
+  return { ...food, sourceId, id, createdAt, lastUsedAt: null };
 }
 
 /** Looks up a search result's cached row by source+sourceId, caching it if this is the

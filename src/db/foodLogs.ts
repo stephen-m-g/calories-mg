@@ -104,6 +104,58 @@ export async function deleteFoodLog(id: string): Promise<void> {
   await db.runAsync('DELETE FROM food_logs WHERE id = ?', id);
 }
 
+/**
+ * How many times a food must have been logged before its history is treated as a habit rather
+ * than a coincidence. Two entries could be the same one-off meal logged twice.
+ */
+const MIN_PORTION_SAMPLES = 3;
+
+/** Portions drift — a year-old habit shouldn't outvote how you've been eating recently. */
+const PORTION_WINDOW_DAYS = 180;
+
+/**
+ * The user's typical amount for a food, as a median of recent logs. Null until there's enough
+ * history to be meaningful.
+ *
+ * Matched on food *name* rather than `food_id` deliberately: search ranking can resolve the same
+ * spoken word to slightly different USDA rows on different days, which would splinter one real
+ * habit across several ids and never reach the sample threshold. Unit is part of the key because
+ * "2 each" and "150 g" of the same food aren't comparable quantities.
+ *
+ * Median rather than mean so a single outlier — a holiday portion, a mistyped 1500 — doesn't
+ * drag the everyday default with it.
+ */
+export async function getTypicalQuantity(
+  foodName: string,
+  unit: string
+): Promise<{ amount: number; sampleCount: number } | null> {
+  const db = await getDb();
+  const since = new Date(Date.now() - PORTION_WINDOW_DAYS * 86400000).toISOString();
+
+  const rows = await db.getAllAsync<{ amount: number }>(
+    `SELECT food_logs.quantity_amount AS amount
+     FROM food_logs
+     JOIN foods ON foods.id = food_logs.food_id
+     WHERE LOWER(TRIM(foods.name)) = ?
+       AND food_logs.quantity_unit = ?
+       AND food_logs.logged_at >= ?
+     ORDER BY food_logs.quantity_amount ASC`,
+    foodName.trim().toLowerCase(),
+    unit,
+    since
+  );
+
+  if (rows.length < MIN_PORTION_SAMPLES) return null;
+
+  const middle = Math.floor(rows.length / 2);
+  const median =
+    rows.length % 2 === 0
+      ? (rows[middle - 1].amount + rows[middle].amount) / 2
+      : rows[middle].amount;
+
+  return { amount: Math.round(median * 10) / 10, sampleCount: rows.length };
+}
+
 export async function getEarliestLoggedAt(): Promise<string | null> {
   const db = await getDb();
   const row = await db.getFirstAsync<{ earliest: string | null }>(

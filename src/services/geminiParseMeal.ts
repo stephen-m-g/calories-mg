@@ -11,6 +11,9 @@ export interface ParsedMealItem {
   food: string;
   quantity: number;
   unit: ReferenceUnit;
+  /** True when the speaker gave a real amount, false when the model had to guess from a vague
+   * phrase. Only a guess is safe to replace with the user's own logged history. */
+  amountStated: boolean;
 }
 
 const PROMPT = `You are parsing a spoken meal description into structured food entries for a calorie-tracking app.
@@ -19,6 +22,7 @@ Extract every distinct food or drink item mentioned. For each item, provide:
 - "food": a short, searchable name (e.g. "grilled chicken breast", "white rice", "banana") — strip filler words like "a bowl of" or "some", but keep descriptive words that matter for a nutrition database lookup (e.g. "grilled" vs "fried").
 - "quantity": your best-guess numeric amount. If the speaker gives an exact count or measurement, use it. If they're vague ("a bowl of rice", "a glass of orange juice"), estimate a typical serving in grams or milliliters (e.g. a bowl of rice ~150g, a glass of juice ~240ml).
 - "unit": one of exactly "g", "ml", "oz", or "each". Use "each" for discrete countable items (eggs, slices of toast, apples). Use "g" for solid foods measured by weight, "ml" for liquids, "oz" only if the speaker explicitly says ounces.
+- "amountStated": true if the speaker actually gave the amount (a count like "two eggs", or a measurement like "200 grams"), false if you had to estimate it from a vague phrase like "a bowl of", "some", or no amount at all.
 
 If nothing resembling food is mentioned, return an empty array. Return only the items actually mentioned — do not invent extras.
 
@@ -32,8 +36,9 @@ const RESPONSE_SCHEMA = {
       food: { type: 'STRING' },
       quantity: { type: 'NUMBER' },
       unit: { type: 'STRING', enum: ['g', 'ml', 'oz', 'each'] },
+      amountStated: { type: 'BOOLEAN' },
     },
-    required: ['food', 'quantity', 'unit'],
+    required: ['food', 'quantity', 'unit', 'amountStated'],
   },
 };
 

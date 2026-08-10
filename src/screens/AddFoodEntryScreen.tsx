@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -11,6 +11,7 @@ import {
   touchFoodLastUsed,
   createFoodLog,
   computeRecipeMacros,
+  getTypicalQuantity,
 } from '../db';
 import { colors, fonts, mealTheme } from '../utils/theme';
 import { formatHeaderDate, loggedAtIso, todayYmd } from '../utils/date';
@@ -23,9 +24,27 @@ export function AddFoodEntryScreen({ route, navigation }: Props) {
   const { initialMealType, logDate } = route.params;
   const [food, setFood] = useState(route.params.food);
   const [quantity, setQuantity] = useState(String(food.referenceAmount));
+  // Non-null once history shows a habit for this food; drives the prefill and the note below it.
+  const [typical, setTypical] = useState<{ amount: number; sampleCount: number } | null>(null);
   const [mealType, setMealType] = useState<MealType>(initialMealType ?? 'breakfast');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // The default of one reference serving (100g, 1 each) is rarely what anyone actually eats.
+  // Once a food has been logged enough times, open on that amount instead. Runs once on mount
+  // so it can't overwrite an edit the user has already made.
+  useEffect(() => {
+    let cancelled = false;
+    getTypicalQuantity(food.name, food.referenceUnit).then((result) => {
+      if (cancelled || !result) return;
+      setTypical(result);
+      setQuantity(String(result.amount));
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Recipes aren't immutable — if the user edits one (via the link below) and comes
   // back, refresh the displayed macros rather than showing what's now a stale preview.
@@ -107,6 +126,11 @@ export function AddFoodEntryScreen({ route, navigation }: Props) {
           onChangeText={setQuantity}
           keyboardType="numeric"
         />
+        {typical && (
+          <Text style={styles.typicalNote}>
+            Your usual amount, from {typical.sampleCount} past logs
+          </Text>
+        )}
       </View>
 
       <View style={styles.field}>
@@ -155,6 +179,7 @@ const styles = StyleSheet.create({
   foodName: { fontFamily: fonts.medium, fontSize: 20, color: colors.text },
   foodBrand: { fontFamily: fonts.regular, fontSize: 14, color: colors.textMuted },
   loggingForDate: { fontFamily: fonts.medium, fontSize: 13, color: mealTheme.dinner.border, marginTop: 2 },
+  typicalNote: { fontFamily: fonts.regular, fontSize: 12, color: 'rgba(127, 94, 87, 0.8)' },
   field: { gap: 8 },
   label: { fontFamily: fonts.medium, fontSize: 14, color: colors.textMuted },
   input: {

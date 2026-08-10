@@ -23,6 +23,12 @@ export interface DraftItem {
   suggestedNames: string[];
   /** Ranked database candidates for the current name — the next-best matches. */
   candidates: SearchResultFood[];
+  /** The user's usual amount for this food, or null without enough logged history. */
+  typicalQuantity: number | null;
+  /** How many past logs that median came from, so the UI can show why it's being suggested. */
+  typicalSampleCount: number | null;
+  /** True when the usual amount replaced the model's guess rather than merely being offered. */
+  typicalApplied: boolean;
 }
 
 export type DraftSource = 'voice' | 'photo';

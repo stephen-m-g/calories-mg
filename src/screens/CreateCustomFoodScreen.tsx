@@ -11,14 +11,16 @@ type Props = NativeStackScreenProps<RootStackParamList, 'CreateCustomFood'>;
 
 const UNITS: ReferenceUnit[] = ['g', 'ml', 'oz', 'each'];
 
-export function CreateCustomFoodScreen({ navigation }: Props) {
-  const [name, setName] = useState('');
-  const [servingAmount, setServingAmount] = useState('100');
-  const [servingUnit, setServingUnit] = useState<ReferenceUnit>('g');
-  const [calories, setCalories] = useState('');
-  const [protein, setProtein] = useState('');
-  const [carbs, setCarbs] = useState('');
-  const [fat, setFat] = useState('');
+export function CreateCustomFoodScreen({ route, navigation }: Props) {
+  const { barcode, prefill, logDate, initialMealType } = route.params ?? {};
+
+  const [name, setName] = useState(prefill?.name ?? '');
+  const [servingAmount, setServingAmount] = useState(String(prefill?.servingAmount ?? 100));
+  const [servingUnit, setServingUnit] = useState<ReferenceUnit>(prefill?.servingUnit ?? 'g');
+  const [calories, setCalories] = useState(prefill ? String(prefill.calories) : '');
+  const [protein, setProtein] = useState(prefill ? String(prefill.proteinG) : '');
+  const [carbs, setCarbs] = useState(prefill ? String(prefill.carbsG) : '');
+  const [fat, setFat] = useState(prefill ? String(prefill.fatG) : '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,10 +39,12 @@ export function CreateCustomFoodScreen({ navigation }: Props) {
     setSaving(true);
     setError(null);
     try {
-      await createFood({
+      const created = await createFood({
         source: 'custom',
         sourceId: null,
-        barcode: null,
+        // Storing the scanned code is what makes this a one-time cost: the next scan of this
+        // product resolves locally instead of missing the database again.
+        barcode: barcode ?? null,
         name: name.trim(),
         brand: null,
         referenceAmount: parsedAmount,
@@ -53,6 +57,34 @@ export function CreateCustomFoodScreen({ navigation }: Props) {
         sugarG: null,
         sodiumMg: null,
       });
+
+      // Reached mid-log (via a barcode miss), so carry straight on to logging it rather than
+      // dropping the user back at the scanner having seemingly done nothing.
+      if (logDate) {
+        navigation.replace('AddFoodEntry', {
+          food: {
+            source: 'custom',
+            sourceId: created.id,
+            barcode: created.barcode,
+            name: created.name,
+            brand: created.brand,
+            referenceAmount: created.referenceAmount,
+            referenceUnit: created.referenceUnit,
+            calories: created.calories,
+            proteinG: created.proteinG,
+            carbsG: created.carbsG,
+            fatG: created.fatG,
+            fiberG: created.fiberG,
+            sugarG: created.sugarG,
+            sodiumMg: created.sodiumMg,
+            isGeneric: false,
+            portions: [],
+          },
+          logDate,
+          initialMealType,
+        });
+        return;
+      }
       navigation.goBack();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save food');

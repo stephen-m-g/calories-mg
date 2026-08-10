@@ -15,6 +15,7 @@ import type { RootStackParamList } from '../navigation/types';
 import type { ReferenceUnit } from '../types/models';
 import type { SearchResultFood } from '../types/search';
 import { searchFoods } from '../services/foodSearch';
+import { getTypicalQuantity } from '../db';
 import { withPortions } from '../services/mealDraftBuilder';
 import { resolveQuantity } from '../services/quantity';
 import { nextDraftKey, useMealDraft } from '../state/MealDraftContext';
@@ -64,19 +65,32 @@ export function MealItemEditScreen({ route, navigation }: Props) {
 
   async function applyFood(food: SearchResultFood) {
     const withServing = await withPortions(food, unit);
+    const typical = await getTypicalQuantity(withServing.name, unit);
+
     if (isAdding) {
       draft.addItem({
         key: nextDraftKey('manual'),
         originalName: withServing.name,
         match: withServing,
-        quantity,
+        // Nothing competes with history here — the user picked a food without stating an amount.
+        quantity: typical?.amount ?? quantity,
         unit,
         confidence: null,
         suggestedNames: [],
         candidates: results.filter((r) => r.sourceId !== withServing.sourceId).slice(0, 4),
+        typicalQuantity: typical?.amount ?? null,
+        typicalSampleCount: typical?.sampleCount ?? null,
+        typicalApplied: typical !== null,
       });
     } else if (itemKey) {
-      draft.updateItem(itemKey, { match: withServing });
+      // Swapping the food changes what "usual" means, so the suggestion is recomputed — but the
+      // amount already on screen is left alone, since the user may have just set it deliberately.
+      draft.updateItem(itemKey, {
+        match: withServing,
+        typicalQuantity: typical?.amount ?? null,
+        typicalSampleCount: typical?.sampleCount ?? null,
+        typicalApplied: false,
+      });
     }
     navigation.goBack();
   }

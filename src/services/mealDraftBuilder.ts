@@ -2,6 +2,7 @@ import type { ReferenceUnit } from '../types/models';
 import type { SearchResultFood } from '../types/search';
 import { searchFoods } from './foodSearch';
 import { fetchUsdaPortions } from './usdaFdc';
+import { getTypicalQuantity } from '../db';
 import { nextDraftKey, type DraftItem } from '../state/MealDraftContext';
 
 /** How many ranked database matches to keep as one-tap alternatives on the edit screen. */
@@ -13,6 +14,10 @@ export interface AiMealItem {
   unit: ReferenceUnit;
   confidence?: number;
   alternatives?: string[];
+  /** Whether the amount came from the user rather than the model. Voice sets this from what was
+   * actually spoken; photo leaves it undefined, since every photo amount is an estimate — but
+   * one made while looking at the plate, which beats a historical average for *this* meal. */
+  amountStated?: boolean;
 }
 
 /**
@@ -34,17 +39,28 @@ export async function buildDraftItem(item: AiMealItem, keyPrefix: string): Promi
   const results = await searchFoods(item.food);
   const match = results[0] ? await withPortions(results[0], item.unit) : null;
 
+  // What this food usually means for this user, when there's enough history to tell.
+  const typical = match ? await getTypicalQuantity(match.name, item.unit) : null;
+
+  // Replace the amount only when the model was guessing. A spoken "200 grams" is a fact, and a
+  // photo estimate is grounded in the actual plate — neither should lose to an average. A vague
+  // "a bowl of rice", though, is a generic guess that the user's own history strictly improves on.
+  const useTypical = typical !== null && item.amountStated === false;
+
   return {
     key: nextDraftKey(keyPrefix),
     originalName: item.food,
     match,
-    quantity: item.quantity,
+    quantity: useTypical ? typical.amount : item.quantity,
     unit: item.unit,
     confidence: item.confidence ?? null,
     suggestedNames: item.alternatives ?? [],
     // Skip the first result — it's already the selected match, so showing it as an
     // "alternative" would just be a no-op row.
     candidates: results.slice(1, 1 + CANDIDATE_COUNT),
+    typicalQuantity: typical?.amount ?? null,
+    typicalSampleCount: typical?.sampleCount ?? null,
+    typicalApplied: useTypical,
   };
 }
 

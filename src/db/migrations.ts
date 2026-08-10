@@ -150,6 +150,19 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 5,
+    up: async (db) => {
+      // Custom foods were created with a null source_id, but search results reference them by
+      // their local id — so findOrCacheFood never matched and inserted a fresh duplicate on
+      // every log. Backfilling source_id makes existing rows resolvable again; createFood now
+      // sets it at insert time so new ones are correct from the start.
+      await db.execAsync(`
+        UPDATE foods SET source_id = id
+        WHERE source = 'custom' AND source_id IS NULL;
+      `);
+    },
+  },
 ];
 
 export async function runMigrations(db: SQLiteDatabase): Promise<void> {

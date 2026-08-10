@@ -18,6 +18,12 @@ const MEAL_TYPES: MealType[] = ['breakfast', 'lunch', 'dinner', 'snack'];
 /** Below this the model is guessing more than identifying, so the row asks to be checked. */
 const LOW_CONFIDENCE = 0.6;
 
+/** Don't nag about a difference too small to matter — 160g vs 150g isn't worth a prompt. */
+function differsMeaningfully(current: number, typical: number): boolean {
+  if (current <= 0) return true;
+  return Math.abs(current - typical) / current > 0.2;
+}
+
 export function MealReviewScreen({ navigation }: Props) {
   const draft = useMealDraft();
   const { items, mealType, logDate, source, transcript, photoUri } = draft;
@@ -153,6 +159,28 @@ export function MealReviewScreen({ navigation }: Props) {
                   {item.match?.referenceUnit}
                 </Text>
               )}
+
+              {/* Learned portions are always visible and always reversible — applied ones say so,
+                  and an unapplied one is offered rather than imposed, since a stated amount or a
+                  photo estimate knows more about this meal than an average does. */}
+              {item.typicalApplied && item.typicalSampleCount != null && (
+                <Text style={styles.note}>
+                  Using your usual amount ({item.typicalSampleCount} past logs)
+                </Text>
+              )}
+              {!item.typicalApplied &&
+                item.typicalQuantity != null &&
+                differsMeaningfully(item.quantity, item.typicalQuantity) && (
+                  <Pressable
+                    onPress={() => draft.updateItem(item.key, { quantity: item.typicalQuantity! })}
+                    hitSlop={6}
+                  >
+                    <Text style={styles.suggestionLink}>
+                      You usually log {item.typicalQuantity}
+                      {item.unit === 'each' ? '' : item.unit} — tap to use
+                    </Text>
+                  </Pressable>
+                )}
               {!item.match && (
                 <Text style={styles.warnText}>
                   No database match — tap to search for “{item.originalName}”.
@@ -238,6 +266,7 @@ const styles = StyleSheet.create({
   unitText: { fontFamily: fonts.regular, fontSize: 14, color: colors.textMuted, flex: 1 },
   itemCalories: { fontFamily: fonts.medium, fontSize: 15, color: colors.text },
   note: { fontFamily: fonts.regular, fontSize: 11, color: 'rgba(127, 94, 87, 0.75)' },
+  suggestionLink: { fontFamily: fonts.medium, fontSize: 12, color: mealTheme.dinner.border },
   warnText: { fontFamily: fonts.regular, fontSize: 12, color: 'rgba(179, 38, 30, 0.8)' },
   addRow: {
     flexDirection: 'row',
