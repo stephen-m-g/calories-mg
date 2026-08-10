@@ -1,28 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, AppState, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { File } from 'expo-file-system';
 import type { RootStackParamList } from '../navigation/types';
-import type { MealType, ReferenceUnit } from '../types/models';
-import type { SearchResultFood } from '../types/search';
-import { findOrCacheFood, createFoodLog, touchFoodLastUsed } from '../db';
-import { searchFoods } from '../services/foodSearch';
-import { fetchUsdaPortions } from '../services/usdaFdc';
-import { resolveQuantity, formatQuantity } from '../services/quantity';
 import { transcribeAudio } from '../services/groqTranscribe';
-import { parseMealTranscript, type ParsedMealItem } from '../services/geminiParseMeal';
+import { parseMealTranscript } from '../services/geminiParseMeal';
+import { buildDraftItems } from '../services/mealDraftBuilder';
+import { useMealDraft } from '../state/MealDraftContext';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
-import { loggedAtIso } from '../utils/date';
 import { env } from '../utils/env';
 import { colors, fonts, mealTheme } from '../utils/theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddFoodVoice'>;
 
-type Phase = 'idle' | 'recording' | 'transcribing' | 'reviewTranscript' | 'parsing' | 'reviewItems' | 'saving';
-
-const MEAL_TYPES: MealType[] = ['breakfast', 'lunch', 'dinner', 'snack'];
+type Phase = 'idle' | 'recording' | 'transcribing' | 'reviewTranscript' | 'parsing';
 
 // Below this, a recording is almost certainly an accidental tap rather than real speech —
 // Groq returns a 400, a blank transcript, or a garbage word guessed from the tap noise itself.
@@ -43,16 +36,6 @@ function hasSpeechContent(text: string): boolean {
   return /[a-zA-Z]/.test(text);
 }
 
-interface ReviewItem {
-  key: string;
-  originalFood: string;
-  match: SearchResultFood | null;
-  quantityInput: string;
-  /** The unit as spoken ("2 eggs" -> each), preserved rather than coerced into the food's own
-   * reference unit — logging that as 2 grams was the whole bug this guards against. */
-  unit: ReferenceUnit;
-}
-
 function formatDuration(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
   const minutes = Math.floor(totalSeconds / 60);
@@ -60,42 +43,13 @@ function formatDuration(ms: number): string {
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
-async function buildReviewItems(items: ParsedMealItem[]): Promise<ReviewItem[]> {
-  return Promise.all(
-    items.map(async (item, index) => {
-      const results = await searchFoods(item.food);
-      let match = results[0] ?? null;
-
-      // A spoken count can't be converted without a serving weight, and USDA only returns those
-      // inline for FNDDS foods — so fetch them for anything else before the user sees a total.
-      if (match && item.unit === 'each' && match.portions.length === 0 && match.source === 'usda') {
-        try {
-          const portions = await fetchUsdaPortions(match.sourceId);
-          match = { ...match, portions };
-        } catch {
-          // Leave portions empty; the row renders as unresolvable rather than silently wrong.
-        }
-      }
-
-      return {
-        key: `${index}-${item.food}`,
-        originalFood: item.food,
-        match,
-        quantityInput: String(item.quantity),
-        unit: item.unit,
-      };
-    })
-  );
-}
-
 export function AddFoodVoiceScreen({ route, navigation }: Props) {
   const { logDate, initialMealType } = route.params;
   const recorder = useVoiceRecorder();
+  const draft = useMealDraft();
 
   const [phase, setPhase] = useState<Phase>('idle');
   const [transcript, setTranscript] = useState('');
-  const [items, setItems] = useState<ReviewItem[]>([]);
-  const [mealType, setMealType] = useState<MealType>(initialMealType ?? 'breakfast');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const missingKeys = !env.groqApiKey || !env.geminiApiKey;
@@ -169,63 +123,21 @@ export function AddFoodVoiceScreen({ route, navigation }: Props) {
         setPhase('reviewTranscript');
         return;
       }
-      setItems(await buildReviewItems(parsed));
-      setPhase('reviewItems');
+      draft.startDraft({
+        items: await buildDraftItems(parsed, 'voice'),
+        source: 'voice',
+        mealType: initialMealType ?? 'breakfast',
+        logDate,
+        transcript,
+        photoUri: null,
+      });
+      navigation.navigate('MealReview');
+      setPhase('reviewTranscript');
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Parsing failed');
       setPhase('reviewTranscript');
     }
   }
-
-  function updateQuantity(key: string, value: string) {
-    setItems((prev) => prev.map((it) => (it.key === key ? { ...it, quantityInput: value } : it)));
-  }
-
-  function removeItem(key: string) {
-    setItems((prev) => prev.filter((it) => it.key !== key));
-  }
-
-  async function handleSaveAll() {
-    setPhase('saving');
-    setErrorMessage(null);
-    try {
-      for (const item of items) {
-        if (!item.match) continue;
-        const qty = Number(item.quantityInput);
-        const { scale } = resolveQuantity(qty, item.unit, item.match);
-        if (scale <= 0) continue;
-
-        const cachedFood = await findOrCacheFood(item.match);
-        await createFoodLog({
-          foodId: cachedFood.id,
-          loggedAt: loggedAtIso(logDate),
-          mealType,
-          quantityAmount: qty,
-          // Store the unit as spoken, so the log reads "×2" rather than a gram weight the user
-          // never said. Macros are already resolved through the portion conversion above.
-          quantityUnit: item.unit,
-          calories: Math.round(item.match.calories * scale),
-          proteinG: Math.round(item.match.proteinG * scale),
-          carbsG: Math.round(item.match.carbsG * scale),
-          fatG: Math.round(item.match.fatG * scale),
-          inputMethod: 'voice',
-          photoUri: null,
-          rawTranscript: transcript,
-        });
-        await touchFoodLastUsed(cachedFood.id);
-      }
-      navigation.popToTop();
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Failed to save');
-      setPhase('reviewItems');
-    }
-  }
-
-  // Mirrors the guard in handleSaveAll, so the button count never promises rows that get skipped
-  // (a count with no available serving weight can't be converted and won't be written).
-  const savableCount = items.filter(
-    (it) => it.match && resolveQuantity(Number(it.quantityInput), it.unit, it.match).scale > 0
-  ).length;
 
   if (missingKeys) {
     return (
@@ -266,11 +178,11 @@ export function AddFoodVoiceScreen({ route, navigation }: Props) {
         </View>
       )}
 
-      {(phase === 'transcribing' || phase === 'parsing' || phase === 'saving') && (
+      {(phase === 'transcribing' || phase === 'parsing') && (
         <View style={styles.centeredContent}>
           <ActivityIndicator size="large" color={colors.textMuted} />
           <Text style={styles.subtitle}>
-            {phase === 'transcribing' ? 'Transcribing…' : phase === 'parsing' ? 'Parsing meal…' : 'Saving…'}
+            {phase === 'transcribing' ? 'Transcribing…' : 'Parsing meal…'}
           </Text>
         </View>
       )}
@@ -297,99 +209,6 @@ export function AddFoodVoiceScreen({ route, navigation }: Props) {
               <Text style={styles.saveButtonText}>Parse meal</Text>
             </Pressable>
           </View>
-        </View>
-      )}
-
-      {phase === 'reviewItems' && (
-        <View style={styles.flexContainer}>
-          <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-            <Text style={styles.label}>Meal</Text>
-            <View style={styles.mealRow}>
-              {MEAL_TYPES.map((type) => (
-                <Pressable
-                  key={type}
-                  style={[styles.mealChip, mealType === type && styles.mealChipActive]}
-                  onPress={() => setMealType(type)}
-                >
-                  <Text style={[styles.mealChipText, mealType === type && styles.mealChipTextActive]}>
-                    {type[0].toUpperCase() + type.slice(1)}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <Text style={styles.label}>Items</Text>
-            {items.map((item) => {
-              const qty = Number(item.quantityInput);
-              const resolved = item.match
-                ? resolveQuantity(qty, item.unit, item.match)
-                : null;
-              const previewCalories =
-                item.match && resolved ? Math.round(item.match.calories * resolved.scale) : null;
-              const unresolvedCount = item.unit === 'each' && resolved !== null && resolved.scale <= 0;
-              return (
-                <View key={item.key} style={styles.itemCard}>
-                  <View style={styles.itemHeader}>
-                    <Text style={styles.itemName} numberOfLines={1}>
-                      {item.match?.name ?? item.originalFood}
-                    </Text>
-                    <Pressable onPress={() => removeItem(item.key)} hitSlop={8}>
-                      <Ionicons name="close" size={18} color={colors.textMuted} />
-                    </Pressable>
-                  </View>
-                  {item.match ? (
-                    <>
-                      <View style={styles.itemRow}>
-                        <TextInput
-                          style={styles.quantityInput}
-                          value={item.quantityInput}
-                          onChangeText={(v) => updateQuantity(item.key, v)}
-                          keyboardType="numeric"
-                        />
-                        <Text style={styles.unitText}>
-                          {item.unit === 'each' ? (qty === 1 ? 'item' : 'items') : item.unit}
-                        </Text>
-                        <Text style={styles.itemCalories}>
-                          {previewCalories != null && resolved && resolved.scale > 0
-                            ? `${previewCalories} cal`
-                            : '—'}
-                        </Text>
-                      </View>
-                      {/* Counts hide the real weight behind an average, so show what it worked
-                          out to — the difference between 2 eggs and 100g is worth seeing. */}
-                      {resolved?.portion && resolved.resolvedAmount != null && (
-                        <Text style={styles.conversionNote}>
-                          {resolved.portion.label} ≈ {Math.round(resolved.portion.gramWeight)}g · total{' '}
-                          {Math.round(resolved.resolvedAmount)}
-                          {item.match.referenceUnit}
-                        </Text>
-                      )}
-                      {unresolvedCount && (
-                        <Text style={styles.noMatchText}>
-                          No serving size available for this food — switch to grams by editing the
-                          transcript, or log it manually.
-                        </Text>
-                      )}
-                    </>
-                  ) : (
-                    <Text style={styles.noMatchText}>
-                      No database match for "{item.originalFood}" — remove it and add manually from Home.
-                    </Text>
-                  )}
-                </View>
-              );
-            })}
-          </ScrollView>
-
-          <Pressable
-            style={[styles.saveButton, savableCount === 0 && styles.saveButtonDisabled]}
-            onPress={handleSaveAll}
-            disabled={savableCount === 0}
-          >
-            <Text style={styles.saveButtonText}>
-              Log {savableCount} item{savableCount === 1 ? '' : 's'}
-            </Text>
-          </Pressable>
         </View>
       )}
     </SafeAreaView>
@@ -448,30 +267,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   secondaryButtonText: { fontFamily: fonts.medium, fontSize: 15, color: colors.text },
-  scrollContent: { gap: 8, paddingBottom: 12 },
-  mealRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 16 },
-  mealChip: { borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#FFFFFF' },
-  mealChipActive: { backgroundColor: colors.textMuted },
-  mealChipText: { fontFamily: fonts.regular, fontSize: 14, color: colors.text },
-  mealChipTextActive: { fontFamily: fonts.medium, color: '#FFFFFF' },
-  itemCard: { backgroundColor: '#FFFFFF', borderRadius: 12, padding: 14, gap: 8 },
-  itemHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  itemName: { fontFamily: fonts.medium, fontSize: 15, color: colors.text, flex: 1, marginRight: 8 },
-  itemRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  quantityInput: {
-    fontFamily: fonts.regular,
-    fontSize: 15,
-    color: colors.text,
-    backgroundColor: colors.background,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    width: 70,
-  },
-  unitText: { fontFamily: fonts.regular, fontSize: 14, color: colors.textMuted, flex: 1 },
-  conversionNote: { fontFamily: fonts.regular, fontSize: 11, color: 'rgba(127, 94, 87, 0.75)' },
-  itemCalories: { fontFamily: fonts.medium, fontSize: 15, color: colors.text },
-  noMatchText: { fontFamily: fonts.regular, fontSize: 13, color: 'rgba(179, 38, 30, 0.8)' },
   saveButton: {
     backgroundColor: colors.textMuted,
     borderRadius: 12,

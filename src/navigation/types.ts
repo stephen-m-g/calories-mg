@@ -17,6 +17,11 @@ export type RootStackParamList = {
   AddFoodVoice: { logDate: string; initialMealType?: MealType };
   CreateRecipe: { recipeId?: string } | undefined;
   CreateCustomFood: undefined;
+  /** Shared final step for the voice and photo flows. Items live in MealDraftContext rather
+   * than params — they hold food objects and are mutated from the edit screen. */
+  MealReview: undefined;
+  /** itemKey null means "add another food" rather than editing an existing row. */
+  MealItemEdit: { itemKey: string | null };
 };
 
 declare global {

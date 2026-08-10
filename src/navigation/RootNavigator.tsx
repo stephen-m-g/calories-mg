@@ -8,6 +8,9 @@ import { AddFoodBarcodeScreen } from '../screens/AddFoodBarcodeScreen';
 import { AddFoodVoiceScreen } from '../screens/AddFoodVoiceScreen';
 import { CreateRecipeScreen } from '../screens/CreateRecipeScreen';
 import { CreateCustomFoodScreen } from '../screens/CreateCustomFoodScreen';
+import { MealReviewScreen } from '../screens/MealReviewScreen';
+import { MealItemEditScreen } from '../screens/MealItemEditScreen';
+import { MealDraftProvider } from '../state/MealDraftContext';
 import { colors, fonts } from '../utils/theme';
 import type { RootStackParamList } from './types';
 
@@ -15,7 +18,9 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export function RootNavigator() {
   return (
-    <Stack.Navigator
+    // Wraps the stack so the review and item-edit routes operate on one shared draft.
+    <MealDraftProvider>
+      <Stack.Navigator
       screenOptions={{
         headerStyle: { backgroundColor: colors.background },
         headerTitleStyle: { fontFamily: fonts.medium, color: colors.textMuted },
@@ -49,6 +54,9 @@ export function RootNavigator() {
         component={CreateCustomFoodScreen}
         options={{ title: 'New Food', presentation: 'modal' }}
       />
-    </Stack.Navigator>
+      <Stack.Screen name="MealReview" component={MealReviewScreen} options={{ title: 'Review Meal' }} />
+      <Stack.Screen name="MealItemEdit" component={MealItemEditScreen} options={{ title: 'Edit Item' }} />
+      </Stack.Navigator>
+    </MealDraftProvider>
   );
 }
