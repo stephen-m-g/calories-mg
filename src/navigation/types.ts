@@ -12,9 +12,9 @@ export type RootStackParamList = {
   Settings: undefined;
   AddFoodSearch: { logDate: string; initialMealType?: MealType };
   AddFoodEntry: { food: SearchResultFood; logDate: string; initialMealType?: MealType };
-  AddFoodPhoto: { initialMealType?: MealType } | undefined;
-  AddFoodBarcode: { initialMealType?: MealType } | undefined;
-  AddFoodVoice: { initialMealType?: MealType } | undefined;
+  AddFoodPhoto: { logDate: string; initialMealType?: MealType };
+  AddFoodBarcode: { logDate: string; initialMealType?: MealType };
+  AddFoodVoice: { logDate: string; initialMealType?: MealType };
   CreateRecipe: { recipeId?: string } | undefined;
   CreateCustomFood: undefined;
 };

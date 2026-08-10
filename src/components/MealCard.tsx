@@ -3,6 +3,7 @@ import { Alert, Animated, Dimensions, Pressable, StyleSheet, Text, View } from '
 import type { MealType } from '../types/models';
 import type { FoodLogWithFoodName } from '../db';
 import { mealTheme, fonts } from '../utils/theme';
+import { formatQuantity } from '../services/quantity';
 
 const MEAL_LABELS: Record<MealType, string> = {
   breakfast: 'Breakfast',
@@ -63,10 +64,7 @@ export function MealCard({ mealType, logs, expanded, isFirst, isLast, onToggle, 
             <Text style={styles.entryName} numberOfLines={1} ellipsizeMode="tail">
               {log.foodName}
             </Text>
-            <Text style={styles.entryQuantity}>
-              {log.quantityAmount}
-              {log.quantityUnit}
-            </Text>
+            <Text style={styles.entryQuantity}>{formatQuantity(log.quantityAmount, log.quantityUnit)}</Text>
           </View>
           <Text style={styles.entryCalories}>{Math.round(log.calories)} cal</Text>
         </Pressable>
@@ -190,19 +188,19 @@ const styles = StyleSheet.create({
   entryTextCol: { flexShrink: 1 },
   entryName: {
     fontFamily: fonts.regular,
-    fontSize: 16,
-    color: '#000000',
+    fontSize: 14,
+    color: 'rgba(0, 0, 0, 0.75)',
     maxWidth: MAX_NAME_WIDTH,
   },
   entryQuantity: {
     fontFamily: fonts.regular,
-    fontSize: 12,
-    color: '#000000',
+    fontSize: 11,
+    color: 'rgba(0, 0, 0, 0.75)',
   },
   entryCalories: {
     fontFamily: fonts.regular,
-    fontSize: 20,
-    color: '#000000',
+    fontSize: 17,
+    color: 'rgba(0, 0, 0, 0.75)',
   },
   totalRow: {
     flexDirection: 'row',

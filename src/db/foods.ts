@@ -76,6 +76,18 @@ export async function getRecentFoods(limit = 20): Promise<Food[]> {
   return rows.map(rowToFood);
 }
 
+/** Lowercased names of foods logged before, for search ranking. With a single user, "what you
+ * picked last time" is the only popularity signal available — and a reliable one, since people
+ * re-eat the same foods constantly. Bigger trackers get this from aggregate crowd data. */
+export async function getRecentFoodNames(limit = 300): Promise<Set<string>> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ name: string }>(
+    'SELECT name FROM foods WHERE last_used_at IS NOT NULL ORDER BY last_used_at DESC LIMIT ?',
+    limit
+  );
+  return new Set(rows.map((r) => r.name.trim().toLowerCase()));
+}
+
 export type NewFood = Omit<Food, 'id' | 'createdAt' | 'lastUsedAt'>;
 
 export async function createFood(food: NewFood): Promise<Food> {

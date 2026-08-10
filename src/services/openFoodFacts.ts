@@ -68,6 +68,11 @@ function hitToSearchResult(hit: OffSearchHit): SearchResultFood | null {
     referenceAmount: 100,
     referenceUnit: 'g',
     ...macros,
+    // Open Food Facts is a packaged-products database — nothing in it is a generic whole food.
+    isGeneric: false,
+    // OFF nutriments are per 100 g and it exposes no structured per-item serving weights,
+    // so counts ("2 of these") can't be resolved against a branded product.
+    portions: [],
   };
 }
 
@@ -107,5 +112,7 @@ export async function lookupOpenFoodFactsBarcode(barcode: string): Promise<Searc
     referenceAmount: 100,
     referenceUnit: 'g',
     ...macros,
+    isGeneric: false,
+    portions: [],
   };
 }

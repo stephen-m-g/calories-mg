@@ -44,6 +44,12 @@ function foodToSearchResult(food: Food): SearchResultFood {
     fiberG: food.fiberG,
     sugarG: food.sugarG,
     sodiumMg: food.sodiumMg,
+    // Cached rows don't retain which USDA dataset they came from, so infer: an unbranded
+    // USDA food is a generic one. Only affects labelling here — these tabs aren't re-ranked.
+    isGeneric: food.source === 'usda' && !food.brand,
+    // Portion weights aren't cached in `foods`; they're refetched on demand when a count
+    // actually needs converting.
+    portions: [],
   };
 }
 
@@ -126,6 +132,10 @@ export function AddFoodSearchScreen({ navigation, route }: Props) {
       fiberG: null,
       sugarG: null,
       sodiumMg: null,
+      // A user's own recipe isn't a packaged product. Its reference unit is already 'each'
+      // (one batch), so counts need no portion conversion.
+      isGeneric: true,
+      portions: [],
       ...macros,
     });
   }
@@ -147,13 +157,13 @@ export function AddFoodSearchScreen({ navigation, route }: Props) {
   function handleSelectMethod(method: AddMethod) {
     switch (method) {
       case 'photo':
-        navigation.navigate('AddFoodPhoto', { initialMealType });
+        navigation.navigate('AddFoodPhoto', { logDate, initialMealType });
         break;
       case 'barcode':
-        navigation.navigate('AddFoodBarcode', { initialMealType });
+        navigation.navigate('AddFoodBarcode', { logDate, initialMealType });
         break;
       case 'voice':
-        navigation.navigate('AddFoodVoice', { initialMealType });
+        navigation.navigate('AddFoodVoice', { logDate, initialMealType });
         break;
     }
   }
@@ -210,7 +220,6 @@ export function AddFoodSearchScreen({ navigation, route }: Props) {
           onChangeText={setQuery}
           onSubmitEditing={runOnlineSearch}
           returnKeyType="search"
-          autoFocus
         />
       </View>
 
@@ -272,7 +281,16 @@ export function AddFoodSearchScreen({ navigation, route }: Props) {
             return (
               <Pressable style={styles.resultRow} onPress={() => openEntry(food)}>
                 <View style={styles.resultText}>
-                  <Text style={styles.resultName}>{food.name}</Text>
+                  <View style={styles.resultNameRow}>
+                    <Text style={styles.resultName} numberOfLines={2}>
+                      {food.name}
+                    </Text>
+                    {item.kind === 'online' && food.isGeneric && (
+                      <View style={styles.genericBadge}>
+                        <Text style={styles.genericBadgeText}>Generic</Text>
+                      </View>
+                    )}
+                  </View>
                   <Text style={styles.resultMeta}>
                     {food.brand ? `${food.brand} · ` : ''}
                     {Math.round(food.calories)} kcal / {food.referenceAmount}
@@ -370,6 +388,14 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   resultText: { flex: 1, gap: 2 },
-  resultName: { fontFamily: fonts.medium, fontSize: 16, color: colors.text },
+  resultName: { fontFamily: fonts.medium, fontSize: 16, color: colors.text, flexShrink: 1 },
+  resultNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  genericBadge: {
+    backgroundColor: 'rgba(127, 94, 87, 0.12)',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  genericBadgeText: { fontFamily: fonts.medium, fontSize: 10, color: colors.textMuted },
   resultMeta: { fontFamily: fonts.regular, fontSize: 13, color: colors.textMuted },
 });

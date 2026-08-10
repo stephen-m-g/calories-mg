@@ -131,6 +131,25 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 4,
+    up: async (db) => {
+      // Cached USDA rows written before the kcal fix may hold kilojoules in `calories` (~4.2x
+      // too high): SR Legacy foods return two nutrients named "Energy" and the old name-based
+      // lookup could pick the kJ one. `foods` is only a cache, so dropping the affected rows
+      // makes them re-fetch correctly on next use.
+      //
+      // Rows still referenced by a food_log are left alone — deleting them would break the
+      // foreign key, and those logs keep their own macro snapshots either way. Past logs made
+      // with inflated values stay wrong; only re-caching is repaired here.
+      await db.execAsync(`
+        DELETE FROM foods
+        WHERE source = 'usda'
+          AND id NOT IN (SELECT DISTINCT food_id FROM food_logs)
+          AND id NOT IN (SELECT DISTINCT food_id FROM recipe_ingredients);
+      `);
+    },
+  },
 ];
 
 export async function runMigrations(db: SQLiteDatabase): Promise<void> {
