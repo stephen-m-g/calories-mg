@@ -13,4 +13,5 @@ export * from './recipes';
 export * from './waterLogs';
 export * from './weightLogs';
 export * from './userSettings';
+export * from './whoop';
 export * from './backupLog';

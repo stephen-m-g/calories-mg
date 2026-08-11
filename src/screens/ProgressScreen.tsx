@@ -19,6 +19,8 @@ import {
   getEarliestLoggedAt,
   getWeightLogsBetween,
   getEarliestWeightLoggedAt,
+  getWhoopCyclesBetween,
+  getWhoopConnection,
   createWeightLog,
   getRecentWeightLogs,
   deleteWeightLog,
@@ -37,18 +39,19 @@ const CHART_WIDTH = Dimensions.get('window').width - SCREEN_PADDING * 2 - CARD_P
 const PLOT_WIDTH = CHART_WIDTH - Y_AXIS_LABEL_WIDTH;
 const TICK_WIDTH = 46;
 
-type Metric = 'calories' | 'weight';
+type Metric = 'calories' | 'net' | 'weight';
 
 interface MetricOption {
-  key: Metric | 'net';
+  key: Metric;
   label: string;
   unit: string;
-  locked?: boolean;
+  /** Net calories needs WHOOP burn data, so it stays locked until a connection exists. */
+  requiresWhoop?: boolean;
 }
 
 const METRIC_OPTIONS: MetricOption[] = [
   { key: 'calories', label: 'Calories Eaten', unit: 'cal' },
-  { key: 'net', label: 'Net Calories', unit: 'cal', locked: true },
+  { key: 'net', label: 'Net Calories', unit: 'cal', requiresWhoop: true },
   { key: 'weight', label: 'Weight', unit: 'lb' },
 ];
 
@@ -101,7 +104,7 @@ interface ChartSeries {
 async function buildSeries(metric: Metric, range: TimeRange): Promise<ChartSeries> {
   const endYmd = todayYmd();
 
-  const earliestIso = metric === 'calories' ? await getEarliestLoggedAt() : await getEarliestWeightLoggedAt();
+  const earliestIso = metric === 'weight' ? await getEarliestWeightLoggedAt() : await getEarliestLoggedAt();
   const earliestYmd = earliestIso ? isoToLocalYmd(earliestIso) : endYmd;
 
   // The window never extends further back than real history exists, so a short history
@@ -120,6 +123,17 @@ async function buildSeries(metric: Metric, range: TimeRange): Promise<ChartSerie
     for (const log of await getFoodLogsBetween(startIso, endIso)) {
       const ymd = isoToLocalYmd(log.loggedAt);
       byDay.set(ymd, (byDay.get(ymd) ?? 0) + log.calories);
+    }
+  } else if (metric === 'net') {
+    // Net needs both sides of the equation, so a day only counts when it has a WHOOP burn
+    // figure — eaten-with-no-burn would read as a huge surplus that never happened.
+    const eatenByDay = new Map<string, number>();
+    for (const log of await getFoodLogsBetween(startIso, endIso)) {
+      const ymd = isoToLocalYmd(log.loggedAt);
+      eatenByDay.set(ymd, (eatenByDay.get(ymd) ?? 0) + log.calories);
+    }
+    for (const cycle of await getWhoopCyclesBetween(windowStartYmd, endYmd)) {
+      byDay.set(cycle.cycleDate, (eatenByDay.get(cycle.cycleDate) ?? 0) - cycle.caloriesBurned);
     }
   } else {
     // Logs come back ASC-ordered, so the last weigh-in of a day naturally wins here.
@@ -198,6 +212,7 @@ export function ProgressScreen() {
   const [recentWeights, setRecentWeights] = useState<WeightLog[]>([]);
   const [weightInput, setWeightInput] = useState('');
   const [logging, setLogging] = useState(false);
+  const [whoopConnected, setWhoopConnected] = useState(false);
 
   const loadChart = useCallback(async () => {
     setLoadingChart(true);
@@ -219,6 +234,7 @@ export function ProgressScreen() {
       // when navigating back to this tab, not only when range/metric change.
       loadChart();
       loadWeights();
+      getWhoopConnection().then((c) => setWhoopConnected(c.connected));
     }, [loadChart, loadWeights])
   );
 
@@ -253,14 +269,14 @@ export function ProgressScreen() {
 
   function handleSelectMetric(option: MetricOption) {
     setDropdownOpen(false);
-    if (option.locked) {
+    if (option.requiresWhoop && !whoopConnected) {
       Alert.alert(
         'Requires WHOOP',
-        "Net calories tracks calories eaten against calories burned, which needs a live WHOOP connection. That's coming in a later phase."
+        'Net calories tracks calories eaten against calories burned. Connect WHOOP in Settings to enable it.'
       );
       return;
     }
-    setMetric(option.key as Metric);
+    setMetric(option.key);
   }
 
   const activeOption = METRIC_OPTIONS.find((o) => o.key === metric)!;
@@ -269,11 +285,19 @@ export function ProgressScreen() {
   const points = series.points;
   const isEmpty = !points.some((p) => p.hasData);
 
-  // Both metrics sit in a band well above zero, so the axis starts just below the lowest
-  // reading rather than at 0 — otherwise real day-to-day variation reads as a flat line.
   const realValues = points.filter((p) => p.hasData).map((p) => p.value);
+
+  // Net calories is the one metric where zero is meaningful rather than merely small: a day
+  // below the axis is a deficit and above it a surplus, so the axis must stay anchored at zero
+  // instead of being shifted up to fill the plot.
+  const isNet = metric === 'net';
+  const mostNegative = isNet && realValues.length ? Math.min(0, Math.min(...realValues)) : 0;
+  const netMax = isNet && realValues.length ? Math.max(0, Math.max(...realValues)) : 0;
+
+  // Everything else sits in a band well above zero, so the axis starts just below the lowest
+  // reading — otherwise real day-to-day variation reads as a flat line.
   let yAxisOffset = 0;
-  if (realValues.length) {
+  if (realValues.length && !isNet) {
     const min = Math.min(...realValues);
     if (metric === 'weight') {
       yAxisOffset = Math.max(0, Math.floor(min) - 3);
@@ -283,6 +307,17 @@ export function ProgressScreen() {
       yAxisOffset = Math.max(0, Math.floor(min - buffer));
     }
   }
+
+  /** Zero-centred axis config, applied only for net calories. */
+  const netAxisProps = isNet
+    ? {
+        maxValue: Math.max(netMax, 100),
+        mostNegativeValue: Math.min(mostNegative, -100),
+        noOfSectionsBelowXAxis: 2,
+        noOfSections: 2,
+        xAxisLabelsAtBottom: true,
+      }
+    : {};
 
   // Bars: 7 fixed sections that exactly consume the plot width.
   const barSection = (PLOT_WIDTH - 8) / 7;
@@ -302,10 +337,16 @@ export function ProgressScreen() {
     offsets.length > 1 ? (offsets[offsets.length - 1] - offsets[0]) / (offsets.length - 1) : PLOT_WIDTH;
 
   const barData = points.map((p) => ({
-    value: p.hasData ? p.value : yAxisOffset,
+    // Empty slots collapse to the axis baseline: zero for net, the offset otherwise.
+    value: p.hasData ? p.value : isNet ? 0 : yAxisOffset,
     label: p.label,
     labelWidth: barSection,
-    frontColor: p.hasData ? accentColor : 'transparent',
+    // Surplus and deficit are opposite outcomes, so they shouldn't share a colour.
+    frontColor: !p.hasData
+      ? 'transparent'
+      : isNet && p.value > 0
+        ? mealTheme.snack.border
+        : accentColor,
   }));
 
   // gifted-charts attaches an item's `spacing` to the gap AFTER it (toward the next point),
@@ -329,13 +370,18 @@ export function ProgressScreen() {
     pointerLabelComponent: (_items: unknown[], _secondary: unknown, index: number) => {
       const point = points[index];
       if (!point) return null;
-      const shown = metric === 'calories' ? Math.round(point.value) : point.value;
+      const shown = metric === 'weight' ? point.value : Math.round(point.value);
       return (
         <View style={styles.tooltipCard}>
           <Text style={styles.tooltipDate}>{point.dateLabel}</Text>
           <Text style={styles.tooltipValue}>
-            {point.hasData ? `${shown} ${activeOption.unit}` : 'No entry'}
+            {point.hasData
+              ? `${isNet && point.value > 0 ? '+' : ''}${shown} ${activeOption.unit}`
+              : 'No entry'}
           </Text>
+          {point.hasData && isNet && (
+            <Text style={styles.tooltipDate}>{point.value > 0 ? 'surplus' : 'deficit'}</Text>
+          )}
         </View>
       );
     },
@@ -354,6 +400,7 @@ export function ProgressScreen() {
     xAxisColor: 'rgba(127, 94, 87, 0.3)',
     endSpacing: 0,
     pointerConfig,
+    ...netAxisProps,
   };
 
   return (
@@ -380,12 +427,14 @@ export function ProgressScreen() {
                     style={[
                       styles.metricMenuItemText,
                       option.key === metric && styles.metricMenuItemTextActive,
-                      option.locked && styles.metricMenuItemTextLocked,
+                      option.requiresWhoop && !whoopConnected && styles.metricMenuItemTextLocked,
                     ]}
                   >
                     {option.label}
                   </Text>
-                  {option.locked && <Ionicons name="lock-closed" size={13} color="rgba(127, 94, 87, 0.5)" />}
+                  {option.requiresWhoop && !whoopConnected && (
+                    <Ionicons name="lock-closed" size={13} color="rgba(127, 94, 87, 0.5)" />
+                  )}
                 </Pressable>
               ))}
             </View>

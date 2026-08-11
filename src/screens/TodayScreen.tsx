@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -16,6 +16,8 @@ import {
 import { todayYmd, dayBoundsIso, formatHeaderDate, getWeekDates, startOfWeekYmd } from '../utils/date';
 import { colors, fonts } from '../utils/theme';
 import { CalorieMacroCard } from '../components/CalorieMacroCard';
+import { DeficitCard } from '../components/DeficitCard';
+import { getBurnedCalories, type BurnedCalories } from '../services/whoopApi';
 import { MealCard } from '../components/MealCard';
 import { WeekStrip } from '../components/WeekStrip';
 import { DateCalendarModal } from '../components/DateCalendarModal';
@@ -31,6 +33,8 @@ export function TodayScreen() {
   const [loggedDays, setLoggedDays] = useState<Set<string>>(new Set());
   const [expandedMealType, setExpandedMealType] = useState<MealType | null>(null);
   const [calendarOpen, setCalendarOpen] = useState(false);
+  const [burned, setBurned] = useState<BurnedCalories | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   // The week strip can be swiped to browse other weeks without changing which
   // day is actually active — so it re-syncs to the active day's week whenever
@@ -69,12 +73,34 @@ export function TodayScreen() {
     loadWeek();
   }, [loadWeek]);
 
+  // Only fetched in deficit mode — no reason to hit WHOOP when nothing displays the result.
+  const loadBurned = useCallback(async () => {
+    const current = await getUserSettings();
+    if (current.goalMode !== 'deficit') {
+      setBurned(null);
+      return;
+    }
+    setBurned(await getBurnedCalories(selectedDate));
+  }, [selectedDate]);
+
   useFocusEffect(
     useCallback(() => {
       loadDay();
       loadWeek();
-    }, [loadDay, loadWeek])
+      // WHOOP is a polled source (no backend to receive its webhooks), so refreshing on focus
+      // is what keeps the burn figure current through the day.
+      loadBurned();
+    }, [loadDay, loadWeek, loadBurned])
   );
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      await Promise.all([loadDay(), loadBurned()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   const totals = logs.reduce(
     (acc, log) => ({
@@ -104,7 +130,13 @@ export function TodayScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.textMuted} />
+        }
+      >
         <View style={styles.headerRow}>
           <Pressable style={styles.dateRow} onPress={() => setCalendarOpen(true)} hitSlop={8}>
             <Text style={styles.dateText}>{formatHeaderDate(selectedDate)}</Text>
@@ -126,17 +158,32 @@ export function TodayScreen() {
         </View>
 
         <View style={styles.calorieWrap}>
-          <CalorieMacroCard
-            caloriesEaten={totals.calories}
-            calorieGoal={settings?.calorieGoal ?? 2000}
-            mealCalories={mealCaloriesByType}
-            protein={totals.protein}
-            proteinGoal={settings?.proteinGoalG ?? null}
-            carbs={totals.carbs}
-            carbsGoal={settings?.carbsGoalG ?? null}
-            fat={totals.fat}
-            fatGoal={settings?.fatGoalG ?? null}
-          />
+          {settings?.goalMode === 'deficit' ? (
+            <DeficitCard
+              caloriesEaten={totals.calories}
+              caloriesBurned={burned?.caloriesBurned ?? null}
+              burnedFromCache={burned?.fromCache ?? false}
+              deficitGoalKcal={settings.deficitGoalKcal}
+              protein={totals.protein}
+              proteinGoal={settings.proteinGoalG}
+              carbs={totals.carbs}
+              carbsGoal={settings.carbsGoalG}
+              fat={totals.fat}
+              fatGoal={settings.fatGoalG}
+            />
+          ) : (
+            <CalorieMacroCard
+              caloriesEaten={totals.calories}
+              calorieGoal={settings?.calorieGoal ?? 2000}
+              mealCalories={mealCaloriesByType}
+              protein={totals.protein}
+              proteinGoal={settings?.proteinGoalG ?? null}
+              carbs={totals.carbs}
+              carbsGoal={settings?.carbsGoalG ?? null}
+              fat={totals.fat}
+              fatGoal={settings?.fatGoalG ?? null}
+            />
+          )}
         </View>
 
         <View style={styles.meals}>
