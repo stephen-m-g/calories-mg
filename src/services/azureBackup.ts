@@ -38,6 +38,14 @@ export interface BackupResult {
   message: string;
 }
 
+/** Azure's error responses are XML like `<Error><Code>AuthenticationFailed</Code>...`. Pulling
+ * just the code out avoids dumping a raw XML blob in front of the user while keeping the part
+ * that's actually actionable. */
+function extractAzureErrorCode(body: string): string | null {
+  const match = body.match(/<Code>([^<]+)<\/Code>/);
+  return match ? match[1] : null;
+}
+
 export async function runBackup(): Promise<BackupResult> {
   const sasUrl = await getBackupSasUrl();
   if (!sasUrl) {
@@ -68,9 +76,14 @@ export async function runBackup(): Promise<BackupResult> {
     // location the file was written to, so it's what gets recorded rather than a derived path.
     const success = response.status === 201;
     await createBackupLogEntry(sasUrl, success ? 'success' : 'failed');
-    return success
-      ? { success: true, message: `Backed up ${(bytes.byteLength / 1024).toFixed(0)} KB.` }
-      : { success: false, message: `Azure rejected the upload (${response.status}).` };
+    if (success) {
+      return { success: true, message: `Backed up ${(bytes.byteLength / 1024).toFixed(0)} KB.` };
+    }
+    // Azure's error body is real diagnostic text (e.g. "AuthenticationFailed", "SignatureDoesNotMatch",
+    // "AuthorizationPermissionMismatch" for a read-only SAS) — surfacing it beats a bare status code
+    // for figuring out which part of the SAS URL setup is wrong.
+    const reason = extractAzureErrorCode(response.body) ?? `HTTP ${response.status}`;
+    return { success: false, message: `Azure rejected the upload: ${reason}` };
   } catch (err) {
     await createBackupLogEntry(sasUrl, 'failed');
     return {

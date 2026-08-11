@@ -6,16 +6,9 @@ import Constants from 'expo-constants';
 import { getUserSettings, updateUserSettings, getWhoopConnection, getRecentBackupLogs } from '../db';
 import type { GoalMode } from '../types/models';
 import { colors, fonts } from '../utils/theme';
-import {
-  connectWhoop,
-  clearWhoopTokens,
-  isWhoopConfigured,
-  isWhoopAvailable,
-  getRedirectUri,
-} from '../services/whoopAuth';
+import { connectWhoop, clearWhoopTokens, isWhoopConfigured, isWhoopAvailable } from '../services/whoopAuth';
 import { syncLatestCycle } from '../services/whoopApi';
 import { getBackupSasUrl, setBackupSasUrl, clearBackupSasUrl, runBackup } from '../services/azureBackup';
-import { seedDevData, clearDevData } from '../dev/seedDevData';
 
 export function SettingsScreen() {
   const [loading, setLoading] = useState(true);
@@ -27,7 +20,6 @@ export function SettingsScreen() {
   const [fatGoal, setFatGoal] = useState('');
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
-  const [seeding, setSeeding] = useState(false);
   // Static for the life of the app — no need to track as state.
   const whoopAvailable = isWhoopAvailable();
   const [whoopConnected, setWhoopConnectedState] = useState(false);
@@ -154,30 +146,6 @@ export function SettingsScreen() {
         },
       },
     ]);
-  }
-
-  async function handleSeed() {
-    setSeeding(true);
-    try {
-      const { foodLogs, weightLogs } = await seedDevData();
-      Alert.alert('Test data seeded', `${foodLogs} food logs and ${weightLogs} weigh-ins over the last 6 months. Open Progress to check the charts.`);
-    } catch (err) {
-      Alert.alert('Seeding failed', err instanceof Error ? err.message : String(err));
-    } finally {
-      setSeeding(false);
-    }
-  }
-
-  async function handleClearSeed() {
-    setSeeding(true);
-    try {
-      await clearDevData();
-      Alert.alert('Test data cleared', 'Only seeded rows were removed — anything you logged yourself is untouched.');
-    } catch (err) {
-      Alert.alert('Clear failed', err instanceof Error ? err.message : String(err));
-    } finally {
-      setSeeding(false);
-    }
   }
 
   async function handleSave() {
@@ -344,18 +312,6 @@ export function SettingsScreen() {
               />
             )}
           </Pressable>
-
-          {/* The redirect URI has to be registered with WHOOP *exactly*, and its value depends on
-              how the app was built (production vs dev-server-attached vs Expo Go). Showing the
-              real computed value beats documenting a guess — long-press to copy. */}
-          {!whoopConnected && (
-            <View style={styles.redirectBox}>
-              <Text style={styles.redirectLabel}>Redirect URI to register with WHOOP</Text>
-              <Text style={styles.redirectValue} selectable>
-                {getRedirectUri()}
-              </Text>
-            </View>
-          )}
         </View>
 
         <View style={styles.section}>
@@ -427,30 +383,6 @@ export function SettingsScreen() {
           )}
         </View>
 
-        {__DEV__ && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Developer</Text>
-            <Pressable
-              style={[styles.devButton, seeding && styles.devButtonDisabled]}
-              onPress={handleSeed}
-              disabled={seeding}
-            >
-              <Ionicons name="flask-outline" size={18} color={colors.textMuted} />
-              <Text style={styles.devButtonText}>
-                {seeding ? 'Working…' : 'Seed 6 months of test data'}
-              </Text>
-            </Pressable>
-            <Pressable
-              style={[styles.devButton, seeding && styles.devButtonDisabled]}
-              onPress={handleClearSeed}
-              disabled={seeding}
-            >
-              <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
-              <Text style={styles.devButtonText}>Clear test data</Text>
-            </Pressable>
-          </View>
-        )}
-
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>About</Text>
           <Text style={styles.aboutText}>
@@ -469,17 +401,6 @@ const styles = StyleSheet.create({
   screenTitle: { fontFamily: fonts.extraBold, fontSize: 24, color: colors.textMuted },
   section: { gap: 12 },
   sectionTitle: { fontFamily: fonts.medium, fontSize: 15, color: colors.textMuted },
-  devButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  devButtonDisabled: { opacity: 0.5 },
-  devButtonText: { fontFamily: fonts.regular, fontSize: 15, color: colors.text },
   modeRow: { flexDirection: 'row', gap: 8 },
   modeChip: {
     flexDirection: 'row',
@@ -529,15 +450,6 @@ const styles = StyleSheet.create({
   lockedText: { flex: 1, gap: 2 },
   lockedTitle: { fontFamily: fonts.medium, fontSize: 15, color: 'rgba(0, 0, 0, 0.6)' },
   connectedTitle: { color: colors.text },
-  redirectBox: {
-    backgroundColor: 'rgba(127, 94, 87, 0.06)',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 4,
-  },
-  redirectLabel: { fontFamily: fonts.regular, fontSize: 11, color: colors.textMuted },
-  redirectValue: { fontFamily: fonts.medium, fontSize: 13, color: colors.text },
   removeLink: {
     fontFamily: fonts.regular,
     fontSize: 12,
