@@ -1,8 +1,8 @@
-# Privacy Policy — Calorie Tracker
+# Privacy Policy — risu
 
 **Last updated:** 11 August 2026
 
-Calorie Tracker ("the app") is a personal-use food and nutrition logging application built for a
+risu ("the app") is a personal-use food and nutrition logging application built for a
 single individual. It is not distributed publicly, has no user accounts, and is not operated as a
 commercial service.
 

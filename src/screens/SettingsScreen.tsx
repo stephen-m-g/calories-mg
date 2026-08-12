@@ -386,7 +386,7 @@ export function SettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>About</Text>
           <Text style={styles.aboutText}>
-            {Constants.expoConfig?.name ?? 'Calorie Tracker'} · v{Constants.expoConfig?.version ?? '1.0.0'}
+            {Constants.expoConfig?.name ?? 'risu'} · v{Constants.expoConfig?.version ?? '1.0.0'}
           </Text>
         </View>
       </ScrollView>
