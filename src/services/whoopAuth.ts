@@ -94,7 +94,6 @@ export async function connectWhoop(): Promise<ConnectResult> {
   const redirectUri = getRedirectUri();
   const request = new AuthSession.AuthRequest({
     clientId: env.whoopClientId,
-    clientSecret: env.whoopClientSecret,
     scopes: SCOPES,
     redirectUri,
     responseType: AuthSession.ResponseType.Code,
@@ -112,11 +111,16 @@ export async function connectWhoop(): Promise<ConnectResult> {
   const tokens = await AuthSession.exchangeCodeAsync(
     {
       clientId: env.whoopClientId,
-      clientSecret: env.whoopClientSecret,
       code: result.params.code,
       redirectUri,
-      // WHOOP validates the code against the same verifier the request generated.
-      extraParams: request.codeVerifier ? { code_verifier: request.codeVerifier } : undefined,
+      // Passing `clientSecret` as its own field makes expo-auth-session authenticate via an HTTP
+      // Basic header instead — WHOOP's token endpoint doesn't support that and rejects it as
+      // invalid_client. Routing it through extraParams keeps it as a body field (client_secret_post),
+      // which is the shape WHOOP's own docs use. Also carries the PKCE verifier when present.
+      extraParams: {
+        client_secret: env.whoopClientSecret,
+        ...(request.codeVerifier ? { code_verifier: request.codeVerifier } : {}),
+      },
     },
     DISCOVERY
   );
@@ -136,11 +140,13 @@ async function refreshAccessToken(refreshToken: string): Promise<string | null> 
   const tokens = await AuthSession.refreshAsync(
     {
       clientId: env.whoopClientId,
-      clientSecret: env.whoopClientSecret,
       refreshToken,
       // WHOOP requires the scopes again on refresh, and dropping `offline` here would return a
       // token with no successor — the connection would work once, then expire permanently.
       scopes: SCOPES,
+      // See the matching note in connectWhoop() — client_secret has to travel in the body, not
+      // as a Basic auth header, or WHOOP rejects the request as invalid_client.
+      extraParams: { client_secret: env.whoopClientSecret },
     },
     DISCOVERY
   );
