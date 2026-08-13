@@ -7,7 +7,7 @@ import { getUserSettings, updateUserSettings, getWhoopConnection, getRecentBacku
 import type { GoalMode } from '../types/models';
 import { colors, fonts } from '../utils/theme';
 import { connectWhoop, clearWhoopTokens, isWhoopConfigured, isWhoopAvailable } from '../services/whoopAuth';
-import { syncLatestCycle } from '../services/whoopApi';
+import { syncRecentCycles } from '../services/whoopApi';
 import { getBackupSasUrl, setBackupSasUrl, clearBackupSasUrl, runBackup } from '../services/azureBackup';
 
 export function SettingsScreen() {
@@ -119,7 +119,7 @@ export function SettingsScreen() {
         await refreshWhoopState();
         // Pull a cycle straight away so the connection proves itself with a real number.
         try {
-          await syncLatestCycle();
+          await syncRecentCycles();
           await refreshWhoopState();
         } catch {
           // Connected fine; the first sync can wait for the Today screen.

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -13,6 +13,16 @@ import {
   computeRecipeMacros,
   getTypicalQuantity,
 } from '../db';
+import {
+  buildServingOptions,
+  defaultQuantityFor,
+  ensurePortions,
+  optionKey,
+  optionLabel,
+  quantityFieldsFor,
+  scaleFor,
+  type ServingOption,
+} from '../services/servings';
 import { colors, fonts, mealTheme } from '../utils/theme';
 import { formatHeaderDate, loggedAtIso, todayYmd } from '../utils/date';
 
@@ -23,28 +33,60 @@ const MEAL_TYPES: MealType[] = ['breakfast', 'lunch', 'dinner', 'snack'];
 export function AddFoodEntryScreen({ route, navigation }: Props) {
   const { initialMealType, logDate } = route.params;
   const [food, setFood] = useState(route.params.food);
-  const [quantity, setQuantity] = useState(String(food.referenceAmount));
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [quantity, setQuantity] = useState<string | null>(null);
   // Non-null once history shows a habit for this food; drives the prefill and the note below it.
   const [typical, setTypical] = useState<{ amount: number; sampleCount: number } | null>(null);
   const [mealType, setMealType] = useState<MealType>(initialMealType ?? 'breakfast');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // The default of one reference serving (100g, 1 each) is rarely what anyone actually eats.
-  // Once a food has been logged enough times, open on that amount instead. Runs once on mount
-  // so it can't overwrite an edit the user has already made.
+  const options = useMemo(() => buildServingOptions(food), [food]);
+  // Falls back to the leading option, which is the best serving the food knows about — so before
+  // anything has loaded the screen still opens on something sensible rather than a raw 100 g.
+  const selected = options.find((o) => optionKey(o) === selectedKey) ?? options[0];
+
+  // USDA generics arrive without portions (they're only inline on FNDDS hits), so "1 banana"
+  // isn't offered until they're fetched. Doing it here means the picker fills in shortly after
+  // the screen opens rather than requiring the user to go hunting for a count unit.
   useEffect(() => {
     let cancelled = false;
-    getTypicalQuantity(food.name, food.referenceUnit).then((result) => {
-      if (cancelled || !result) return;
-      setTypical(result);
-      setQuantity(String(result.amount));
+    ensurePortions(food).then((withServings) => {
+      if (cancelled || withServings.portions.length === food.portions.length) return;
+      setFood(withServings);
     });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // A reference amount is a denominator, not a serving — opening on it meant every scanned
+  // product started at 100 g regardless of what its own label said. Once a food has been logged
+  // enough times the user's own habit beats even the declared serving, so history wins when it
+  // exists. Only fills a quantity the user hasn't touched.
+  useEffect(() => {
+    if (!selected) return;
+    let cancelled = false;
+    const unit = selected.kind === 'portion' ? 'each' : selected.unit;
+    getTypicalQuantity(food.name, unit).then((result) => {
+      if (cancelled) return;
+      setTypical(result);
+      setQuantity((current) => current ?? String(result?.amount ?? defaultQuantityFor(selected, food.referenceAmount)));
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedKey, food.name, options.length]);
+
+  function selectOption(option: ServingOption) {
+    // Switching between "bananas" and "grams" makes the number on screen meaningless, so it's
+    // reset to that option's own default rather than reinterpreted as the new unit.
+    setSelectedKey(optionKey(option));
+    setQuantity(String(defaultQuantityFor(option, food.referenceAmount)));
+    setTypical(null);
+  }
 
   // Recipes aren't immutable — if the user edits one (via the link below) and comes
   // back, refresh the displayed macros rather than showing what's now a stale preview.
@@ -57,9 +99,9 @@ export function AddFoodEntryScreen({ route, navigation }: Props) {
     }, [food.source, food.sourceId])
   );
 
-  const parsedQuantity = Number(quantity);
+  const parsedQuantity = Number(quantity ?? '');
   const validQuantity = Number.isFinite(parsedQuantity) && parsedQuantity > 0;
-  const scale = validQuantity ? parsedQuantity / food.referenceAmount : 0;
+  const scale = selected && validQuantity ? scaleFor(parsedQuantity, selected, food) : 0;
 
   const previewCalories = Math.round(food.calories * scale);
   const previewProtein = Math.round(food.proteinG * scale);
@@ -67,7 +109,7 @@ export function AddFoodEntryScreen({ route, navigation }: Props) {
   const previewFat = Math.round(food.fatG * scale);
 
   async function handleSave() {
-    if (!validQuantity) return;
+    if (!validQuantity || !selected) return;
     setSaving(true);
     setError(null);
     try {
@@ -80,8 +122,7 @@ export function AddFoodEntryScreen({ route, navigation }: Props) {
         foodId: cachedFood.id,
         loggedAt: loggedAtIso(logDate),
         mealType,
-        quantityAmount: parsedQuantity,
-        quantityUnit: food.referenceUnit,
+        ...quantityFieldsFor(parsedQuantity, selected, food),
         calories: previewCalories,
         proteinG: previewProtein,
         carbsG: previewCarbs,
@@ -119,13 +160,43 @@ export function AddFoodEntryScreen({ route, navigation }: Props) {
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Quantity ({food.referenceUnit})</Text>
-        <TextInput
-          style={styles.input}
-          value={quantity}
-          onChangeText={setQuantity}
-          keyboardType="numeric"
-        />
+        <Text style={styles.label}>Amount</Text>
+        <View style={styles.amountRow}>
+          <TextInput
+            style={[styles.input, styles.quantityInput]}
+            value={quantity ?? ''}
+            onChangeText={setQuantity}
+            keyboardType="numeric"
+          />
+          <View style={styles.optionChips}>
+            {options.map((option) => {
+              const key = optionKey(option);
+              const active = selected != null && optionKey(selected) === key;
+              return (
+                <Pressable
+                  key={key}
+                  style={[styles.optionChip, active && styles.optionChipActive]}
+                  onPress={() => selectOption(option)}
+                >
+                  <Text
+                    style={[styles.optionChipText, active && styles.optionChipTextActive]}
+                    numberOfLines={1}
+                  >
+                    {optionLabel(option)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+        {/* Counting servings hides the weight being logged, which is the number that actually
+            drives the macros — so it's spelled out rather than left to be inferred. */}
+        {selected?.kind === 'portion' && validQuantity && (
+          <Text style={styles.resolvedNote}>
+            {Math.round(parsedQuantity * selected.gramWeight)}
+            {food.referenceUnit} total
+          </Text>
+        )}
         {typical && (
           <Text style={styles.typicalNote}>
             Your usual amount, from {typical.sampleCount} past logs
@@ -180,6 +251,7 @@ const styles = StyleSheet.create({
   foodBrand: { fontFamily: fonts.regular, fontSize: 14, color: colors.textMuted },
   loggingForDate: { fontFamily: fonts.medium, fontSize: 13, color: mealTheme.dinner.border, marginTop: 2 },
   typicalNote: { fontFamily: fonts.regular, fontSize: 12, color: 'rgba(127, 94, 87, 0.8)' },
+  resolvedNote: { fontFamily: fonts.medium, fontSize: 12, color: colors.textMuted },
   field: { gap: 8 },
   label: { fontFamily: fonts.medium, fontSize: 14, color: colors.textMuted },
   input: {
@@ -191,6 +263,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
+  amountRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  quantityInput: { width: 84 },
+  optionChips: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  optionChip: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexShrink: 1,
+  },
+  optionChipActive: { backgroundColor: colors.textMuted },
+  optionChipText: { fontFamily: fonts.regular, fontSize: 13, color: colors.text },
+  optionChipTextActive: { fontFamily: fonts.medium, color: '#FFFFFF' },
   mealRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   mealChip: {
     borderRadius: 20,

@@ -163,6 +163,24 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 6,
+    up: async (db) => {
+      // Serving sizes were fetched but never stored: `portions` existed only on the in-memory
+      // search result and was dropped by findOrCacheFood, so every food fell back to its raw
+      // reference amount (100 g) the moment it was cached. Persisting them makes "1 serving"
+      // and "2 bananas" survive a round trip through the database.
+      //
+      // Logs record which portion was chosen so an entry can read back as "2 bananas" rather
+      // than "252g" — the gram weight is snapshotted alongside the label because a portion's
+      // weight is an upstream average that can change under us, and a past log must not move.
+      await db.execAsync(`
+        ALTER TABLE foods ADD COLUMN serving_portions TEXT;
+        ALTER TABLE food_logs ADD COLUMN portion_label TEXT;
+        ALTER TABLE food_logs ADD COLUMN portion_gram_weight REAL;
+      `);
+    },
+  },
 ];
 
 export async function runMigrations(db: SQLiteDatabase): Promise<void> {

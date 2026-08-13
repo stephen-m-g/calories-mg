@@ -64,7 +64,9 @@ export function AddFoodBarcodeScreen({ route, navigation }: Props) {
           sugarG: cached.sugarG,
           sodiumMg: cached.sodiumMg,
           isGeneric: false,
-          portions: [],
+          // Persisted now, so a re-scanned product keeps the serving its label declared instead
+          // of dropping back to a bare 100 g.
+          portions: cached.portions,
         });
         return;
       }

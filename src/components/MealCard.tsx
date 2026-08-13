@@ -3,7 +3,7 @@ import { Alert, Animated, Dimensions, Pressable, StyleSheet, Text, View } from '
 import type { MealType } from '../types/models';
 import type { FoodLogWithFoodName } from '../db';
 import { mealTheme, fonts } from '../utils/theme';
-import { formatQuantity } from '../services/quantity';
+import { formatLoggedQuantity } from '../services/quantity';
 
 const MEAL_LABELS: Record<MealType, string> = {
   breakfast: 'Breakfast',
@@ -64,7 +64,7 @@ export function MealCard({ mealType, logs, expanded, isFirst, isLast, onToggle, 
             <Text style={styles.entryName} numberOfLines={1} ellipsizeMode="tail">
               {log.foodName}
             </Text>
-            <Text style={styles.entryQuantity}>{formatQuantity(log.quantityAmount, log.quantityUnit)}</Text>
+            <Text style={styles.entryQuantity}>{formatLoggedQuantity(log)}</Text>
           </View>
           <Text style={styles.entryCalories}>{Math.round(log.calories)} cal</Text>
         </Pressable>

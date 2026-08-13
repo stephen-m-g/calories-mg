@@ -19,7 +19,7 @@ import {
   getEarliestLoggedAt,
   getWeightLogsBetween,
   getEarliestWeightLoggedAt,
-  getWhoopCyclesBetween,
+  getWhoopBurnByDate,
   getWhoopConnection,
   createWeightLog,
   getRecentWeightLogs,
@@ -132,8 +132,8 @@ async function buildSeries(metric: Metric, range: TimeRange): Promise<ChartSerie
       const ymd = isoToLocalYmd(log.loggedAt);
       eatenByDay.set(ymd, (eatenByDay.get(ymd) ?? 0) + log.calories);
     }
-    for (const cycle of await getWhoopCyclesBetween(windowStartYmd, endYmd)) {
-      byDay.set(cycle.cycleDate, (eatenByDay.get(cycle.cycleDate) ?? 0) - cycle.caloriesBurned);
+    for (const [ymd, burned] of await getWhoopBurnByDate(windowStartYmd, endYmd)) {
+      byDay.set(ymd, (eatenByDay.get(ymd) ?? 0) - burned);
     }
   } else {
     // Logs come back ASC-ordered, so the last weigh-in of a day naturally wins here.

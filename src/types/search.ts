@@ -1,11 +1,8 @@
-import type { FoodSource, ReferenceUnit } from './models';
+import type { FoodPortion, FoodSource, ReferenceUnit } from './models';
 
-/** A named serving size for a food, e.g. "1 large" = 50 g. Sourced from USDA portion data and
- * used to turn a spoken count ("2 eggs") into a real weight. */
-export interface FoodPortion {
-  label: string;
-  gramWeight: number;
-}
+// Lives in models.ts because `Food` carries it too — re-exported here so the search-side
+// modules that deal in portions don't all need to reach into the persistence types.
+export type { FoodPortion };
 
 /** A food search result, normalized from either USDA FDC or Open Food Facts, before it's cached into `foods`. */
 export interface SearchResultFood {

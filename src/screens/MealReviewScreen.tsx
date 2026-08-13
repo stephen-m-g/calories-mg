@@ -7,6 +7,7 @@ import type { RootStackParamList } from '../navigation/types';
 import type { MealType } from '../types/models';
 import { createFoodLog, findOrCacheFood, touchFoodLastUsed } from '../db';
 import { resolveQuantity } from '../services/quantity';
+import { normalizePortionLabel } from '../services/servings';
 import { useMealDraft, type DraftItem } from '../state/MealDraftContext';
 import { loggedAtIso } from '../utils/date';
 import { colors, fonts, mealTheme } from '../utils/theme';
@@ -53,6 +54,10 @@ export function MealReviewScreen({ navigation }: Props) {
           quantityAmount: item.quantity,
           // Stored as spoken/estimated ("x2"), not the gram weight it resolved to.
           quantityUnit: item.unit,
+          // A count was resolved through a named serving ("1 banana" = 126 g) — keeping that
+          // serving lets the entry read back as what was said instead of a bare multiplier.
+          portionLabel: resolved.portion ? normalizePortionLabel(resolved.portion.label) : null,
+          portionGramWeight: resolved.portion?.gramWeight ?? null,
           calories: Math.round(item.match.calories * resolved.scale),
           proteinG: Math.round(item.match.proteinG * resolved.scale),
           carbsG: Math.round(item.match.carbsG * resolved.scale),

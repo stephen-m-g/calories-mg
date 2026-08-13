@@ -120,3 +120,25 @@ export function formatQuantity(amount: number, unit: ReferenceUnit): string {
   const rounded = Math.round(amount * 10) / 10;
   return unit === 'each' ? `×${rounded}` : `${rounded}${unit}`;
 }
+
+/**
+ * How a saved entry reads back on the day's list.
+ *
+ * A logged count is only meaningful with the serving it counted — "×2" alone doesn't say two of
+ * what, or how much food that was. When the entry carries a portion, both are shown: the serving
+ * that was chosen, and the weight it works out to, which is the number the macros came from.
+ */
+export function formatLoggedQuantity(log: {
+  quantityAmount: number;
+  quantityUnit: ReferenceUnit;
+  portionLabel: string | null;
+  portionGramWeight: number | null;
+}): string {
+  const amount = Math.round(log.quantityAmount * 10) / 10;
+  if (!log.portionLabel) return formatQuantity(amount, log.quantityUnit);
+
+  // "1 banana" rather than "1 × banana"; the multiplier only earns its place above one.
+  const counted = amount === 1 ? log.portionLabel : `${amount} × ${log.portionLabel}`;
+  if (!log.portionGramWeight) return counted;
+  return `${counted} · ${Math.round(amount * log.portionGramWeight)}g`;
+}

@@ -5,6 +5,13 @@ export type InputMethod = 'manual' | 'voice' | 'photo' | 'barcode';
 export type GoalMode = 'fixed_intake' | 'deficit';
 export type BackupStatus = 'success' | 'failed';
 
+/** A named serving size for a food, e.g. "1 large" = 50 g. Sourced from USDA portion data or a
+ * packaged product's declared serving, and used to log counts ("2 eggs") instead of raw weight. */
+export interface FoodPortion {
+  label: string;
+  gramWeight: number;
+}
+
 export interface Food {
   id: string;
   source: FoodSource;
@@ -21,6 +28,8 @@ export interface Food {
   fiberG: number | null;
   sugarG: number | null;
   sodiumMg: number | null;
+  /** Known serving sizes, persisted so they survive caching. Empty when none are known. */
+  portions: FoodPortion[];
   createdAt: string;
   lastUsedAt: string | null;
 }
@@ -32,6 +41,12 @@ export interface FoodLog {
   mealType: MealType;
   quantityAmount: number;
   quantityUnit: ReferenceUnit;
+  /** Which named serving the amount counts, when it isn't a raw weight — "banana", "serving".
+   * Null for plain weight/volume entries. */
+  portionLabel: string | null;
+  /** Grams per portion at the time of logging, snapshotted so a past entry can't shift if the
+   * upstream average is revised. */
+  portionGramWeight: number | null;
   calories: number;
   proteinG: number;
   carbsG: number;
@@ -88,14 +103,6 @@ export interface WhoopConnection {
   whoopUserId: string | null;
   tokenExpiresAt: string | null;
   lastSyncedAt: string | null;
-}
-
-export interface WhoopCycleCache {
-  id: string;
-  cycleDate: string;
-  kilojoules: number;
-  caloriesBurned: number;
-  fetchedAt: string;
 }
 
 export interface BackupLogEntry {

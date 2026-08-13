@@ -9,6 +9,8 @@ interface FoodLogRow {
   meal_type: string;
   quantity_amount: number;
   quantity_unit: string;
+  portion_label: string | null;
+  portion_gram_weight: number | null;
   calories: number;
   protein_g: number;
   carbs_g: number;
@@ -27,6 +29,8 @@ function rowToFoodLog(row: FoodLogRow): FoodLog {
     mealType: row.meal_type as FoodLog['mealType'],
     quantityAmount: row.quantity_amount,
     quantityUnit: row.quantity_unit as FoodLog['quantityUnit'],
+    portionLabel: row.portion_label,
+    portionGramWeight: row.portion_gram_weight,
     calories: row.calories,
     proteinG: row.protein_g,
     carbsG: row.carbs_g,
@@ -48,14 +52,17 @@ export async function createFoodLog(entry: NewFoodLog): Promise<FoodLog> {
   await db.runAsync(
     `INSERT INTO food_logs (
       id, food_id, logged_at, meal_type, quantity_amount, quantity_unit,
+      portion_label, portion_gram_weight,
       calories, protein_g, carbs_g, fat_g, input_method, photo_uri, raw_transcript, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     entry.foodId,
     entry.loggedAt,
     entry.mealType,
     entry.quantityAmount,
     entry.quantityUnit,
+    entry.portionLabel,
+    entry.portionGramWeight,
     entry.calories,
     entry.proteinG,
     entry.carbsG,

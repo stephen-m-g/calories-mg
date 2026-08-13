@@ -1,6 +1,6 @@
 import * as Crypto from 'expo-crypto';
 import { getDb } from './client';
-import type { Food } from '../types/models';
+import type { Food, FoodPortion } from '../types/models';
 import type { SearchResultFood } from '../types/search';
 
 interface FoodRow {
@@ -19,8 +19,33 @@ interface FoodRow {
   fiber_g: number | null;
   sugar_g: number | null;
   sodium_mg: number | null;
+  serving_portions: string | null;
   created_at: string;
   last_used_at: string | null;
+}
+
+/** Portions are stored as a JSON array rather than a child table — they're a small, always
+ * read-whole, never-queried attribute of the food, so a join would buy nothing. Parsing is
+ * defensive because the column predates nothing and can hold rows written before it existed. */
+function parsePortions(json: string | null): FoodPortion[] {
+  if (!json) return [];
+  try {
+    const parsed: unknown = JSON.parse(json);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (p): p is FoodPortion =>
+        typeof p === 'object' &&
+        p !== null &&
+        typeof (p as FoodPortion).label === 'string' &&
+        typeof (p as FoodPortion).gramWeight === 'number'
+    );
+  } catch {
+    return [];
+  }
+}
+
+function serializePortions(portions: FoodPortion[]): string | null {
+  return portions.length > 0 ? JSON.stringify(portions) : null;
 }
 
 function rowToFood(row: FoodRow): Food {
@@ -40,6 +65,7 @@ function rowToFood(row: FoodRow): Food {
     fiberG: row.fiber_g,
     sugarG: row.sugar_g,
     sodiumMg: row.sodium_mg,
+    portions: parsePortions(row.serving_portions),
     createdAt: row.created_at,
     lastUsedAt: row.last_used_at,
   };
@@ -105,8 +131,8 @@ export async function createFood(food: NewFood): Promise<Food> {
     `INSERT INTO foods (
       id, source, source_id, barcode, name, brand,
       reference_amount, reference_unit, calories, protein_g, carbs_g, fat_g,
-      fiber_g, sugar_g, sodium_mg, created_at, last_used_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      fiber_g, sugar_g, sodium_mg, serving_portions, created_at, last_used_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     food.source,
     sourceId,
@@ -122,6 +148,7 @@ export async function createFood(food: NewFood): Promise<Food> {
     food.fiberG,
     food.sugarG,
     food.sodiumMg,
+    serializePortions(food.portions),
     createdAt,
     null
   );
@@ -133,7 +160,16 @@ export async function createFood(food: NewFood): Promise<Food> {
  * first time it's been picked. Shared by the food-entry flow and the recipe builder. */
 export async function findOrCacheFood(food: SearchResultFood): Promise<Food> {
   const existing = await getFoodBySourceId(food.source, food.sourceId);
-  if (existing) return existing;
+  if (existing) {
+    // Rows cached before serving sizes were stored — and rows first cached from a source that
+    // hadn't loaded portions yet — carry none. Backfilling on the next encounter repairs them
+    // in place, which beats deleting and re-fetching since logs may already reference the row.
+    if (existing.portions.length === 0 && food.portions.length > 0) {
+      await updateCachedFoodPortions(existing.id, food.portions);
+      return { ...existing, portions: food.portions };
+    }
+    return existing;
+  }
   return createFood({
     source: food.source,
     sourceId: food.sourceId,
@@ -149,7 +185,13 @@ export async function findOrCacheFood(food: SearchResultFood): Promise<Food> {
     fiberG: food.fiberG,
     sugarG: food.sugarG,
     sodiumMg: food.sodiumMg,
+    portions: food.portions,
   });
+}
+
+export async function updateCachedFoodPortions(id: string, portions: FoodPortion[]): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE foods SET serving_portions = ? WHERE id = ?', serializePortions(portions), id);
 }
 
 export async function touchFoodLastUsed(id: string, when = new Date().toISOString()): Promise<void> {

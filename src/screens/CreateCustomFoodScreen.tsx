@@ -56,6 +56,9 @@ export function CreateCustomFoodScreen({ route, navigation }: Props) {
         fiberG: null,
         sugarG: null,
         sodiumMg: null,
+        // The amount the user typed is itself the serving, so it's already the reference —
+        // a separate named portion would just restate it.
+        portions: [],
       });
 
       // Reached mid-log (via a barcode miss), so carry straight on to logging it rather than
@@ -78,7 +81,7 @@ export function CreateCustomFoodScreen({ route, navigation }: Props) {
             sugarG: created.sugarG,
             sodiumMg: created.sodiumMg,
             isGeneric: false,
-            portions: [],
+            portions: created.portions,
           },
           logDate,
           initialMealType,

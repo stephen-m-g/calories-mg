@@ -47,9 +47,7 @@ function foodToSearchResult(food: Food): SearchResultFood {
     // Cached rows don't retain which USDA dataset they came from, so infer: an unbranded
     // USDA food is a generic one. Only affects labelling here — these tabs aren't re-ranked.
     isGeneric: food.source === 'usda' && !food.brand,
-    // Portion weights aren't cached in `foods`; they're refetched on demand when a count
-    // actually needs converting.
-    portions: [],
+    portions: food.portions,
   };
 }
 

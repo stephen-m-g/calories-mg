@@ -1,7 +1,7 @@
 import type { ReferenceUnit } from '../types/models';
 import type { SearchResultFood } from '../types/search';
 import { searchFoods } from './foodSearch';
-import { fetchUsdaPortions } from './usdaFdc';
+import { ensurePortions } from './servings';
 import { getTypicalQuantity } from '../db';
 import { nextDraftKey, type DraftItem } from '../state/MealDraftContext';
 
@@ -25,13 +25,9 @@ export interface AiMealItem {
  * inline for FNDDS foods — so fetch them on demand for anything else before the user sees a total.
  */
 export async function withPortions(food: SearchResultFood, unit: ReferenceUnit): Promise<SearchResultFood> {
-  if (unit !== 'each' || food.portions.length > 0 || food.source !== 'usda') return food;
-  try {
-    return { ...food, portions: await fetchUsdaPortions(food.sourceId) };
-  } catch {
-    // Leave portions empty; the row shows as unresolvable rather than silently logging wrong.
-    return food;
-  }
+  // Only a count actually needs a serving weight here — a gram amount converts without one, so
+  // there's no reason to spend a request on it mid-draft.
+  return unit === 'each' ? ensurePortions(food) : food;
 }
 
 /** Resolves one AI-named food into a draft row: best match, plus ranked runners-up to swap to. */

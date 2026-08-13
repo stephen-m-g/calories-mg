@@ -204,5 +204,8 @@ export async function getOrRefreshRecipeCachedFood(recipeId: string): Promise<Fo
     fiberG: null,
     sugarG: null,
     sodiumMg: null,
+    // A recipe's reference amount is already one serving of itself, so there's no separate
+    // named portion to offer.
+    portions: [],
   });
 }

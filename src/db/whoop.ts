@@ -1,5 +1,5 @@
 import { getDb } from './client';
-import type { WhoopConnection, WhoopCycleCache } from '../types/models';
+import type { WhoopConnection } from '../types/models';
 
 interface WhoopConnectionRow {
   id: number;
@@ -7,14 +7,6 @@ interface WhoopConnectionRow {
   whoop_user_id: string | null;
   token_expires_at: string | null;
   last_synced_at: string | null;
-}
-
-interface WhoopCycleCacheRow {
-  id: string;
-  cycle_date: string;
-  kilojoules: number;
-  calories_burned: number;
-  fetched_at: string;
 }
 
 const DISCONNECTED: WhoopConnection = {
@@ -77,16 +69,6 @@ export async function updateWhoopTokenExpiry(tokenExpiresAt: string | null): Pro
   await db.runAsync('UPDATE whoop_connection SET token_expires_at = ? WHERE id = 1', tokenExpiresAt);
 }
 
-function rowToCache(row: WhoopCycleCacheRow): WhoopCycleCache {
-  return {
-    id: row.id,
-    cycleDate: row.cycle_date,
-    kilojoules: row.kilojoules,
-    caloriesBurned: row.calories_burned,
-    fetchedAt: row.fetched_at,
-  };
-}
-
 /**
  * Stores a cycle's energy expenditure, keyed by the WHOOP cycle id so repeated polls of the
  * same in-progress cycle overwrite rather than accumulate — the value climbs through the day.
@@ -114,25 +96,35 @@ export async function upsertWhoopCycle(params: {
   );
 }
 
-/** Last known burn for a day. Lets the Today screen show a real number while offline. */
-export async function getWhoopCycleForDate(cycleDate: string): Promise<WhoopCycleCache | null> {
+/** A day's total burn. Lets the Today screen show a real number while offline.
+ *
+ * Summed rather than "most recently fetched": WHOOP cycles are wake-to-wake, so an unusual
+ * sleep pattern (a late nap, an all-nighter) can start two cycles on the same calendar day.
+ * Taking one of them would silently under-report that day's burn. */
+export async function getWhoopBurnForDate(cycleDate: string): Promise<number | null> {
   const db = await getDb();
-  const row = await db.getFirstAsync<WhoopCycleCacheRow>(
-    'SELECT * FROM whoop_cycle_cache WHERE cycle_date = ? ORDER BY fetched_at DESC LIMIT 1',
+  const row = await db.getFirstAsync<{ total: number | null }>(
+    'SELECT SUM(calories_burned) AS total FROM whoop_cycle_cache WHERE cycle_date = ?',
     cycleDate
   );
-  return row ? rowToCache(row) : null;
+  return row?.total ?? null;
 }
 
-export async function getWhoopCyclesBetween(
+/** Per-day burn totals across a range, keyed by YYYY-MM-DD. Days with no cycle are absent
+ * rather than zero — no data and a zero-burn day mean very different things to a chart. */
+export async function getWhoopBurnByDate(
   startDate: string,
   endDate: string
-): Promise<WhoopCycleCache[]> {
+): Promise<Map<string, number>> {
   const db = await getDb();
-  const rows = await db.getAllAsync<WhoopCycleCacheRow>(
-    'SELECT * FROM whoop_cycle_cache WHERE cycle_date >= ? AND cycle_date <= ? ORDER BY cycle_date ASC',
+  const rows = await db.getAllAsync<{ cycle_date: string; total: number }>(
+    `SELECT cycle_date, SUM(calories_burned) AS total
+     FROM whoop_cycle_cache
+     WHERE cycle_date >= ? AND cycle_date <= ?
+     GROUP BY cycle_date
+     ORDER BY cycle_date ASC`,
     startDate,
     endDate
   );
-  return rows.map(rowToCache);
+  return new Map(rows.map((r) => [r.cycle_date, r.total]));
 }
