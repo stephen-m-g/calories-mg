@@ -22,6 +22,9 @@
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.CAMERA"
       ]
     },
@@ -54,6 +57,12 @@
         "projectId": "1b11e406-09bc-42f3-ba6d-5791144ca9f8"
       }
     },
-    "owner": "stephen-m-g"
+    "owner": "stephen-m-g",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/1b11e406-09bc-42f3-ba6d-5791144ca9f8"
+    }
   }
 }

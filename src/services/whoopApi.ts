@@ -46,20 +46,52 @@ export interface BurnedCalories {
   fromCache: boolean;
 }
 
+/** A cycle spanning more days than this is treated as malformed rather than walked indefinitely. */
+const MAX_CYCLE_SPAN_DAYS = 14;
+
 /**
- * The calendar day a cycle counts toward: the day it *started*.
+ * The calendar day a cycle counts toward: the one it spends the most of its length inside.
  *
- * WHOOP's day is physiological (wake to wake), not midnight to midnight, so a cycle beginning
- * Tuesday morning runs into Wednesday's small hours. Pinning it to its start date gives every
- * cycle exactly one owning day and makes a closed cycle's total final for that day — which is
- * what "calories burned on Tuesday" has to mean if past days are ever going to stop moving.
+ * WHOOP's day is physiological (wake to wake), not midnight to midnight, so a cycle always
+ * straddles a boundary and some rule has to pick a side. Using the *start* date alone looked
+ * right and wasn't: WHOOP only closes a cycle once it processes sleep, so a night it doesn't
+ * record leaves the cycle open and still climbing. Pinned to its start, that growing total stays
+ * welded to the day it began — yesterday keeps rising while today never gets a figure at all.
  *
- * The consequence worth knowing: between midnight and waking, the current cycle still belongs to
- * yesterday, so the new day legitimately has no burn figure yet. Reporting nothing is correct
- * there; reporting yesterday's running total as today's was the bug this replaced.
+ * Majority overlap fixes that without special-casing anything. An ordinary cycle (wake Tue to
+ * wake Wed) puts ~17 of its 24 hours in Tuesday and lands there, same as before. One that runs
+ * long crosses over on its own once most of it sits in the new day, so today starts reporting.
+ * An open cycle is measured up to now, which is what makes the number move through the day.
+ *
+ * It also settles rather than oscillating: the day holding the majority only grows its share as
+ * a cycle extends, so a value that has moved to a day stays there once the cycle closes.
  */
-function attributeToDate(cycle: WhoopCycleRecord): string {
-  return isoToLocalYmd(cycle.start);
+function attributeToDate(cycle: WhoopCycleRecord, now = new Date()): string {
+  const start = new Date(cycle.start);
+  // An open cycle has no end yet; it's still accruing, so it counts up to the present moment.
+  const end = cycle.end ? new Date(cycle.end) : now;
+  if (!Number.isFinite(start.getTime())) return isoToLocalYmd(cycle.start);
+  if (!Number.isFinite(end.getTime()) || end <= start) return isoToLocalYmd(cycle.start);
+
+  const lastDay = isoToLocalYmd(end.toISOString());
+  let day = isoToLocalYmd(cycle.start);
+  let bestDay = day;
+  let bestOverlapMs = -1;
+
+  for (let i = 0; i <= MAX_CYCLE_SPAN_DAYS; i += 1) {
+    const bounds = dayBoundsIso(day);
+    const overlapMs =
+      Math.min(end.getTime(), Date.parse(bounds.endIso)) -
+      Math.max(start.getTime(), Date.parse(bounds.startIso));
+    if (overlapMs > bestOverlapMs) {
+      bestOverlapMs = overlapMs;
+      bestDay = day;
+    }
+    if (day === lastDay) break;
+    day = shiftYmd(day, 1);
+  }
+
+  return bestDay;
 }
 
 /**
@@ -97,14 +129,18 @@ export async function syncRecentCycles(): Promise<number | null> {
   const data: WhoopCycleResponse = await response.json();
   const cycles = data.records ?? [];
 
+  const now = new Date();
   let stored = 0;
   for (const cycle of cycles) {
-    // An unscored cycle has no kilojoule value. Skipping it leaves any previously cached figure
-    // for that day intact, which beats overwriting a real number with a zero.
-    if (cycle.score_state !== 'SCORED' || typeof cycle.score?.kilojoule !== 'number') continue;
+    // Gate on the number actually being there rather than on `score_state`. A cycle in progress
+    // can report PENDING_SCORE while already carrying a real running kilojoule total, and
+    // requiring SCORED threw that away — which on its own is enough to leave the current day
+    // blank. What must never be stored is a missing value dressed up as zero burn, and the type
+    // check is what prevents that.
+    if (typeof cycle.score?.kilojoule !== 'number') continue;
     await upsertWhoopCycle({
       id: String(cycle.id),
-      cycleDate: attributeToDate(cycle),
+      cycleDate: attributeToDate(cycle, now),
       kilojoules: cycle.score.kilojoule,
     });
     stored += 1;
